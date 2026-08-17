@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  serialize-javascript: 7.0.3
+
 importers:
 
   .:
@@ -25,13 +28,13 @@ importers:
         version: 3.0.12(hardhat@3.12.0)
       '@nomicfoundation/hardhat-mocha':
         specifier: ^3.0.0
-        version: 3.1.0(hardhat@3.12.0)(mocha@11.7.6)
+        version: 3.1.0(hardhat@3.12.0)(mocha@11.8.0)
       '@nomicfoundation/hardhat-network-helpers':
         specifier: ^3.0.0
         version: 3.0.11(hardhat@3.12.0)
       '@nomicfoundation/hardhat-toolbox-mocha-ethers':
         specifier: 3.0.7
-        version: 3.0.7(139d3c7c9d5ddf6fd16808ac4e60ccb0)
+        version: 3.0.7(087e85a739d14f167a18520506211558)
       '@nomicfoundation/hardhat-typechain':
         specifier: ^3.0.0
         version: 3.1.1(@nomicfoundation/hardhat-ethers@4.0.15(hardhat@3.12.0))(ethers@6.17.0)(hardhat@3.12.0)(supports-color@8.1.1)(typescript@5.9.3)
@@ -69,8 +72,8 @@ importers:
         specifier: 3.12.0
         version: 3.12.0
       mocha:
-        specifier: ^11.0.0
-        version: 11.7.6
+        specifier: ^11.8.0
+        version: 11.8.0
       solhint:
         specifier: 6.2.4
         version: 6.2.4(typescript@5.9.3)
@@ -603,8 +606,8 @@ packages:
     resolution: {integrity: sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==}
     engines: {node: '>=8'}
 
-  ansi-regex@6.2.2:
-    resolution: {integrity: sha512-Bq3SmSpyFHaWjPk8If9yc6svM8c56dB5BAtW4Qbw5jHTwwXXcTLoRMkpDJp6VL0XzlWaCHTXrkFURMYmD0sLqg==}
+  ansi-regex@6.3.0:
+    resolution: {integrity: sha512-WpDfL7NO6j7tH88IDBNVdUJxDh9nmCteAVW9dsep846XdwF4naCBK+/tGLX3KJgcpgMRXCFlTM2hKGoK9FsdrQ==}
     engines: {node: '>=12'}
 
   ansi-styles@3.2.1:
@@ -1146,8 +1149,8 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  mocha@11.7.6:
-    resolution: {integrity: sha512-nS9xOGbw2I3cjCpxwZAEJ9xK9lmJ08vEkQvLtz4du9ZrF9UrjRpeJGiIgl2Z+Qs++pmB4ecDe48Fwsh+j+j7xA==}
+  mocha@11.8.0:
+    resolution: {integrity: sha512-VyCeUdGN3A9lmCTTgG4yuvY9ixxaDk+xt2R/7/+1AP6EqNG+G9OKkzBwhVtVYoNX8YsxNSgAl8mOv3IAeOpFbw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
     hasBin: true
 
@@ -1252,9 +1255,6 @@ packages:
     resolution: {integrity: sha512-WuyALRjWPDGtt/wzJiadO5AXY+8hZ80hVpe6MyivgraREW751X3SbhRvG3eLKOYN+8VEvqLcf3wdnt44Z4S4SA==}
     engines: {node: '>=10'}
 
-  randombytes@2.1.0:
-    resolution: {integrity: sha512-vYl3iOX+4CKUWuxGi9Ukhie6fsqXqS9FE2Zaic4tNFD2N2QQaXOMFbuKK4QmDHC0JO6B1Zp41J0LpT0oR68amQ==}
-
   rc@1.2.8:
     resolution: {integrity: sha512-y3bGgqKj3QBdxLbLkomlohkvsA8gdAiUQlSBJnBhfn+BPxg4bc62d8TcBW15wavDfgexCgccckhcZvywyQYPOw==}
     hasBin: true
@@ -1317,8 +1317,9 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  serialize-javascript@6.0.2:
-    resolution: {integrity: sha512-Saa1xPByTTq2gdeFZYLLo+RFE35NHZkAbqZeWNd3BpzppeVisAqpDjcp8dyf6uIvEqJRd46jemmyA4iFIeVk8g==}
+  serialize-javascript@7.0.3:
+    resolution: {integrity: sha512-h+cZ/XXarqDgCjo+YSyQU/ulDEESGGf8AMK9pPNmhNSl/FzPl6L8pMp1leca5z6NuG6tvV/auC8/43tmovowww==}
+    engines: {node: '>=20.0.0'}
 
   shebang-command@2.0.0:
     resolution: {integrity: sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA==}
@@ -1860,13 +1861,13 @@ snapshots:
       hardhat: 3.12.0
       zod: 3.25.76
 
-  '@nomicfoundation/hardhat-mocha@3.1.0(hardhat@3.12.0)(mocha@11.7.6)':
+  '@nomicfoundation/hardhat-mocha@3.1.0(hardhat@3.12.0)(mocha@11.8.0)':
     dependencies:
       '@nomicfoundation/hardhat-errors': 3.0.20
       '@nomicfoundation/hardhat-utils': 4.1.7
       '@nomicfoundation/hardhat-zod-utils': 3.0.6(zod@3.25.76)
       hardhat: 3.12.0
-      mocha: 11.7.6
+      mocha: 11.8.0
       tsx: 4.23.12
       zod: 3.25.76
 
@@ -1876,14 +1877,14 @@ snapshots:
       '@nomicfoundation/hardhat-utils': 4.1.7
       hardhat: 3.12.0
 
-  '@nomicfoundation/hardhat-toolbox-mocha-ethers@3.0.7(139d3c7c9d5ddf6fd16808ac4e60ccb0)':
+  '@nomicfoundation/hardhat-toolbox-mocha-ethers@3.0.7(087e85a739d14f167a18520506211558)':
     dependencies:
       '@nomicfoundation/hardhat-ethers': 4.0.15(hardhat@3.12.0)
       '@nomicfoundation/hardhat-ethers-chai-matchers': 3.0.11(@nomicfoundation/hardhat-ethers@4.0.15(hardhat@3.12.0))(chai@6.2.2)(ethers@6.17.0)(hardhat@3.12.0)
       '@nomicfoundation/hardhat-ignition': 3.1.8(@nomicfoundation/hardhat-verify@3.0.22(hardhat@3.12.0))(hardhat@3.12.0)
       '@nomicfoundation/hardhat-ignition-ethers': 3.1.6(@nomicfoundation/hardhat-ethers@4.0.15(hardhat@3.12.0))(@nomicfoundation/hardhat-ignition@3.1.8(@nomicfoundation/hardhat-verify@3.0.22(hardhat@3.12.0))(hardhat@3.12.0))(@nomicfoundation/hardhat-verify@3.0.22(hardhat@3.12.0))(@nomicfoundation/ignition-core@3.1.9)(ethers@6.17.0)(hardhat@3.12.0)
       '@nomicfoundation/hardhat-keystore': 3.0.12(hardhat@3.12.0)
-      '@nomicfoundation/hardhat-mocha': 3.1.0(hardhat@3.12.0)(mocha@11.7.6)
+      '@nomicfoundation/hardhat-mocha': 3.1.0(hardhat@3.12.0)(mocha@11.8.0)
       '@nomicfoundation/hardhat-network-helpers': 3.0.11(hardhat@3.12.0)
       '@nomicfoundation/hardhat-typechain': 3.1.1(@nomicfoundation/hardhat-ethers@4.0.15(hardhat@3.12.0))(ethers@6.17.0)(hardhat@3.12.0)(supports-color@8.1.1)(typescript@5.9.3)
       '@nomicfoundation/hardhat-verify': 3.0.22(hardhat@3.12.0)
@@ -1891,7 +1892,7 @@ snapshots:
       chai: 6.2.2
       ethers: 6.17.0
       hardhat: 3.12.0
-      mocha: 11.7.6
+      mocha: 11.8.0
 
   '@nomicfoundation/hardhat-typechain@3.1.1(@nomicfoundation/hardhat-ethers@4.0.15(hardhat@3.12.0))(ethers@6.17.0)(hardhat@3.12.0)(supports-color@8.1.1)(typescript@5.9.3)':
     dependencies:
@@ -2080,7 +2081,7 @@ snapshots:
 
   ansi-regex@5.0.1: {}
 
-  ansi-regex@6.2.2: {}
+  ansi-regex@6.3.0: {}
 
   ansi-styles@3.2.1:
     dependencies:
@@ -2620,7 +2621,7 @@ snapshots:
 
   mkdirp@1.0.4: {}
 
-  mocha@11.7.6:
+  mocha@11.8.0:
     dependencies:
       browser-stdout: 1.3.1
       chokidar: 4.0.3
@@ -2636,7 +2637,7 @@ snapshots:
       minimatch: 9.0.9
       ms: 2.1.3
       picocolors: 1.1.1
-      serialize-javascript: 6.0.2
+      serialize-javascript: 7.0.3
       strip-json-comments: 3.1.1
       supports-color: 8.1.1
       workerpool: 9.3.4
@@ -2730,10 +2731,6 @@ snapshots:
 
   quick-lru@5.1.1: {}
 
-  randombytes@2.1.0:
-    dependencies:
-      safe-buffer: 5.2.1
-
   rc@1.2.8:
     dependencies:
       deep-extend: 0.6.0
@@ -2781,9 +2778,7 @@ snapshots:
 
   semver@7.8.5: {}
 
-  serialize-javascript@6.0.2:
-    dependencies:
-      randombytes: 2.1.0
+  serialize-javascript@7.0.3: {}
 
   shebang-command@2.0.0:
     dependencies:
@@ -2853,7 +2848,7 @@ snapshots:
 
   strip-ansi@7.2.0:
     dependencies:
-      ansi-regex: 6.2.2
+      ansi-regex: 6.3.0
 
   strip-json-comments@2.0.1: {}
 
