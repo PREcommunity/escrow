@@ -1,0 +1,15 @@
+node_modules
+.pnpm-store
+.DS_Store
+.vscode/
+artifacts
+cache
+coverage
+coverage.json
+typechain-types
+types/ethers-contracts/
+.env
+.keystore-testnet
+.keystore-mainnet
+.deployments/
+*.log
