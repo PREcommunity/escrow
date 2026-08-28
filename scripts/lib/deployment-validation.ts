@@ -29,18 +29,41 @@ export function parseDeploymentCheckStage(value: string | undefined): Deployment
   throw new Error('DEPLOYMENT_CHECK_STAGE must be exactly pre-handoff or final.');
 }
 
-export function readDeploymentAddresses(): DeploymentAddresses {
+export function deploymentEnvironmentKey(
+  deploymentNetwork: DeploymentNetwork,
+  key: string,
+): string {
+  return deploymentNetwork.manifestName === 'base-sepolia' ? `${key}_TESTNET` : key;
+}
+
+export function readRequiredDeploymentAddress(
+  deploymentNetwork: DeploymentNetwork,
+  key: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const environmentKey = deploymentEnvironmentKey(deploymentNetwork, key);
+  const value = environment[environmentKey];
+  if (!value || !ethers.isAddress(value) || value === ethers.ZeroAddress) {
+    throw new Error(`${environmentKey} must be a non-zero public address.`);
+  }
+  return ethers.getAddress(value);
+}
+
+export function readDeploymentAddresses(
+  deploymentNetwork: DeploymentNetwork,
+  environment: NodeJS.ProcessEnv = process.env,
+): DeploymentAddresses {
   return Object.fromEntries(deploymentAddressKeys.map((key) => {
-    const value = process.env[key];
-    if (!value || !ethers.isAddress(value) || value === ethers.ZeroAddress) {
-      throw new Error(`${key} must be a non-zero public address.`);
-    }
-    return [key, ethers.getAddress(value)];
+    return [key, readRequiredDeploymentAddress(deploymentNetwork, key, environment)];
   })) as DeploymentAddresses;
 }
 
-export function readSafeAddress(deploymentNetwork: DeploymentNetwork): string | undefined {
-  const value = process.env.SAFE_ADDRESS?.trim();
+export function readSafeAddress(
+  deploymentNetwork: DeploymentNetwork,
+  environment: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const environmentKey = deploymentEnvironmentKey(deploymentNetwork, 'SAFE_ADDRESS');
+  const value = environment[environmentKey]?.trim();
   if (!value) {
     if (deploymentNetwork.manifestName === 'base') {
       throw new Error('SAFE_ADDRESS is required for the Base mainnet ownership handoff.');
@@ -48,15 +71,19 @@ export function readSafeAddress(deploymentNetwork: DeploymentNetwork): string | 
     return undefined;
   }
   if (!ethers.isAddress(value) || value === ethers.ZeroAddress) {
-    throw new Error('SAFE_ADDRESS must be a non-zero public address when set.');
+    throw new Error(`${environmentKey} must be a non-zero public address when set.`);
   }
   return ethers.getAddress(value);
 }
 
-export function assertInitialOwnerIsDeployer(deployerAddress: string, initialOwner: string): void {
+export function assertInitialOwnerIsDeployer(
+  deployerAddress: string,
+  initialOwner: string,
+  environmentKey = 'OWNER_ADDRESS',
+): void {
   if (ethers.getAddress(deployerAddress) !== ethers.getAddress(initialOwner)) {
     throw new Error(
-      `OWNER_ADDRESS ${initialOwner} must equal the selected deployer keystore address ${deployerAddress}.`,
+      `${environmentKey} ${initialOwner} must equal the selected deployer keystore address ${deployerAddress}.`,
     );
   }
 }

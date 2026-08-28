@@ -1,9 +1,12 @@
 import { ethers, network } from './lib/hardhat-runtime';
 import { readCompiledContract } from './lib/build-info';
+import { DEPLOYMENT_RELEASE } from './lib/deployment-manifest';
 import { assertConnectedChainId, resolveDeploymentNetwork } from './lib/deployer';
 import {
   parseDeploymentCheckStage,
+  deploymentEnvironmentKey,
   readDeploymentAddresses,
+  readRequiredDeploymentAddress,
   readSafeAddress,
   validateDeploymentAddresses,
   validateSafeAddress,
@@ -12,19 +15,15 @@ import { type ImmutableReferences, normalizeImmutableReferences } from './lib/ru
 
 const initialMaxOpenGoalsPerManager = 3n;
 
-function requiredAddress(key: 'ESCROW_ADDRESS'): string {
-  const value = process.env[key];
-  if (!value || !ethers.isAddress(value) || value === ethers.ZeroAddress) {
-    throw new Error(`${key} must be a non-zero public address.`);
-  }
-  return ethers.getAddress(value);
-}
-
-function expectedTreasuryPayout(treasuryAddress: string): string {
-  const value = process.env.TREASURY_PAYOUT_ADDRESS?.trim();
+function expectedTreasuryPayout(
+  deploymentNetwork: ReturnType<typeof resolveDeploymentNetwork>,
+  treasuryAddress: string,
+): string {
+  const environmentKey = deploymentEnvironmentKey(deploymentNetwork, 'TREASURY_PAYOUT_ADDRESS');
+  const value = process.env[environmentKey]?.trim();
   if (!value) return treasuryAddress;
   if (!ethers.isAddress(value) || value === ethers.ZeroAddress) {
-    throw new Error('TREASURY_PAYOUT_ADDRESS must be a non-zero public address when set.');
+    throw new Error(`${environmentKey} must be a non-zero public address when set.`);
   }
   return ethers.getAddress(value);
 }
@@ -49,10 +48,10 @@ async function main() {
   const connectedNetwork = await ethers.provider.getNetwork();
   assertConnectedChainId(deploymentNetwork, connectedNetwork.chainId);
   const checkStage = parseDeploymentCheckStage(process.env.DEPLOYMENT_CHECK_STAGE?.trim());
-  const values = readDeploymentAddresses();
+  const values = readDeploymentAddresses(deploymentNetwork);
   const safeAddress = readSafeAddress(deploymentNetwork);
-  const escrowAddress = requiredAddress('ESCROW_ADDRESS');
-  const treasuryPayoutAddress = expectedTreasuryPayout(values.TREASURY_ADDRESS);
+  const escrowAddress = readRequiredDeploymentAddress(deploymentNetwork, 'ESCROW_ADDRESS');
+  const treasuryPayoutAddress = expectedTreasuryPayout(deploymentNetwork, values.TREASURY_ADDRESS);
   const [tokenValidation] = await Promise.all([
     validateDeploymentAddresses(deploymentNetwork, values),
     validateSafeAddress(
@@ -67,7 +66,18 @@ async function main() {
   await assertRuntimeBytecodeMatches(code);
 
   const escrow = await ethers.getContractAt('PREcommunityEscrowV1', escrowAddress);
-  const [owner, pendingOwner, pre, usdc, treasury, treasuryPayout, paused, maxOpenGoalsPerManager, profile] = await Promise.all([
+  const [
+    owner,
+    pendingOwner,
+    pre,
+    usdc,
+    treasury,
+    treasuryPayout,
+    paused,
+    maxOpenGoalsPerManager,
+    maxMonthlyPeriodsPerSettlement,
+    profile,
+  ] = await Promise.all([
     escrow.getFunction('owner').staticCall() as Promise<string>,
     escrow.getFunction('pendingOwner').staticCall() as Promise<string>,
     escrow.getFunction('PRE').staticCall() as Promise<string>,
@@ -76,6 +86,7 @@ async function main() {
     escrow.getFunction('treasuryPayout').staticCall() as Promise<string>,
     escrow.getFunction('paused').staticCall() as Promise<boolean>,
     escrow.getFunction('maxOpenGoalsPerManager').staticCall() as Promise<bigint>,
+    escrow.getFunction('MAX_MONTHLY_PERIODS_PER_SETTLEMENT').staticCall() as Promise<bigint>,
     escrow.getFunction('getProfile').staticCall(values.OWNER_ADDRESS) as Promise<{
       active: boolean;
       revision: bigint;
@@ -96,6 +107,7 @@ async function main() {
     treasuryPayout: ethers.getAddress(treasuryPayout),
     paused,
     maxOpenGoalsPerManager,
+    maxMonthlyPeriodsPerSettlement,
   };
   const expected = {
     preAddress: values.PRE_ADDRESS,
@@ -142,8 +154,14 @@ async function main() {
       `maxOpenGoalsPerManager must retain its reviewed initial value ${initialMaxOpenGoalsPerManager}, got ${actual.maxOpenGoalsPerManager}.`,
     );
   }
+  if (actual.maxMonthlyPeriodsPerSettlement !== 24n) {
+    throw new Error(
+      `MAX_MONTHLY_PERIODS_PER_SETTLEMENT must be 24, got ${actual.maxMonthlyPeriodsPerSettlement}.`,
+    );
+  }
 
-  const deploymentBlock = process.env.DEPLOYMENT_BLOCK?.trim();
+  const deploymentBlockKey = deploymentEnvironmentKey(deploymentNetwork, 'DEPLOYMENT_BLOCK');
+  const deploymentBlock = process.env[deploymentBlockKey]?.trim();
   if (!deploymentBlock && deploymentNetwork.manifestName === 'base') {
     throw new Error('DEPLOYMENT_BLOCK is required for the Base mainnet readiness check.');
   }
@@ -155,9 +173,11 @@ async function main() {
     events: string[];
   } | undefined;
   if (deploymentBlock) {
-    if (!/^\d+$/.test(deploymentBlock)) throw new Error('DEPLOYMENT_BLOCK must be an unsigned decimal block number.');
+    if (!/^\d+$/.test(deploymentBlock)) {
+      throw new Error(`${deploymentBlockKey} must be an unsigned decimal block number.`);
+    }
     const blockNumber = BigInt(deploymentBlock);
-    if (blockNumber === 0n) throw new Error('DEPLOYMENT_BLOCK must be greater than zero.');
+    if (blockNumber === 0n) throw new Error(`${deploymentBlockKey} must be greater than zero.`);
     const latestBlockNumber = BigInt(await ethers.provider.getBlockNumber());
     if (blockNumber > latestBlockNumber) {
       throw new Error(`DEPLOYMENT_BLOCK ${deploymentBlock} is above the latest block ${latestBlockNumber}.`);
@@ -200,6 +220,7 @@ async function main() {
 
   process.stdout.write(`${JSON.stringify({
     network: deploymentNetwork.manifestName,
+    release: DEPLOYMENT_RELEASE,
     chainId: deploymentNetwork.chainId,
     checkStage,
     escrowAddress,
@@ -208,6 +229,7 @@ async function main() {
     ownershipHandoffTarget: safeAddress ?? null,
     ...actual,
     maxOpenGoalsPerManager: actual.maxOpenGoalsPerManager.toString(),
+    maxMonthlyPeriodsPerSettlement: actual.maxMonthlyPeriodsPerSettlement.toString(),
     tokenDecimals: {
       PRE: Number(tokenValidation.preDecimals),
       USDC: Number(tokenValidation.usdcDecimals),

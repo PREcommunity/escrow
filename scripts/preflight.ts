@@ -5,8 +5,10 @@ import {
   resolveDeploymentNetwork,
 } from './lib/deployer';
 import { estimateDeploymentGasBudget } from './lib/deployment-gas';
+import { DEPLOYMENT_RELEASE } from './lib/deployment-manifest';
 import {
   assertInitialOwnerIsDeployer,
+  deploymentEnvironmentKey,
   readDeploymentAddresses,
   readSafeAddress,
   validateDeploymentAddresses,
@@ -17,14 +19,18 @@ async function main() {
   const deploymentNetwork = resolveDeploymentNetwork(network.name, network.config.chainId);
   const connectedNetwork = await ethers.provider.getNetwork();
   assertConnectedChainId(deploymentNetwork, connectedNetwork.chainId);
-  const values = readDeploymentAddresses();
+  const values = readDeploymentAddresses(deploymentNetwork);
   const safeAddress = readSafeAddress(deploymentNetwork);
   const [tokenValidation] = await Promise.all([
     validateDeploymentAddresses(deploymentNetwork, values),
     validateSafeAddress(values.OWNER_ADDRESS, safeAddress, [values.PRE_ADDRESS, values.USDC_ADDRESS]),
   ]);
   const deployer = await loadDeployer(deploymentNetwork);
-  assertInitialOwnerIsDeployer(deployer.address, values.OWNER_ADDRESS);
+  assertInitialOwnerIsDeployer(
+    deployer.address,
+    values.OWNER_ADDRESS,
+    deploymentEnvironmentKey(deploymentNetwork, 'OWNER_ADDRESS'),
+  );
 
   const factory = await ethers.getContractFactory('PREcommunityEscrowV1', deployer);
   const deploymentRequest = await factory.getDeployTransaction(
@@ -45,6 +51,7 @@ async function main() {
 
   process.stdout.write(`${JSON.stringify({
     network: deploymentNetwork.manifestName,
+    release: DEPLOYMENT_RELEASE,
     chainId: deploymentNetwork.chainId,
     deployer: deployer.address,
     keystoreDecrypted: true,

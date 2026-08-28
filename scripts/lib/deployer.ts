@@ -2,8 +2,11 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { Writable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import { Wallet, type HDNodeWallet } from 'ethers';
 import { ethers } from './hardhat-runtime';
+
+const projectRootPath = fileURLToPath(new URL('../../', import.meta.url));
 
 const deploymentNetworks = {
   testnet: {
@@ -104,7 +107,7 @@ export async function readHiddenInput(prompt: string): Promise<string> {
 }
 
 export function keystorePathFor(deploymentNetwork: DeploymentNetwork): string {
-  return path.resolve(__dirname, '..', '..', deploymentNetwork.keystoreFile);
+  return path.resolve(projectRootPath, deploymentNetwork.keystoreFile);
 }
 
 export async function loadDeployer(deploymentNetwork: DeploymentNetwork): Promise<Wallet | HDNodeWallet> {

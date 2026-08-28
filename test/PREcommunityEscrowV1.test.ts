@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import fc from 'fast-check';
-import { ethers } from '../scripts/lib/hardhat-runtime';
+import { ethers, hardhatConnection } from '../scripts/lib/hardhat-runtime';
 import type { MockERC20, MockReentrantERC20, MockRestrictedERC20, PREcommunityEscrowV1 } from '../typechain-types';
 
 describe('PREcommunityEscrowV1', () => {
@@ -648,20 +648,20 @@ describe('PREcommunityEscrowV1', () => {
     expect((await escrow.goal(goalId)).status).to.equal(1n);
     await escrow.closeGoal(goalId);
     await escrow.connect(recipient).releaseExpense(goalId, await pre.getAddress(), ethers.parseEther('140'));
-    await expect(escrow.releaseSurplus(goalId, await pre.getAddress(), 1n))
-      .to.be.revertedWithCustomError(escrow, 'GoalNotClosed');
+    await expect(escrow.releaseCancelledFunds(goalId, await pre.getAddress(), 1n))
+      .to.be.revertedWithCustomError(escrow, 'GoalNotCancelled');
 
     const cancelled = ethers.id('cancelled');
     await escrow.createGoal(cancelled, recipient.address, 10n, 0n, await futureDeadline(), 'Cancelled', '', '');
     await escrow.connect(sponsor).contribute(cancelled, await pre.getAddress(), 10n, false);
     await escrow.cancelGoal(cancelled);
-    await expect(escrow.releaseSurplus(cancelled, await pre.getAddress(), 0n))
+    await expect(escrow.releaseCancelledFunds(cancelled, await pre.getAddress(), 0n))
       .to.be.revertedWithCustomError(escrow, 'ZeroAmount');
-    await expect(escrow.releaseSurplus(cancelled, await pre.getAddress(), 11n))
-      .to.be.revertedWithCustomError(escrow, 'SurplusLimitExceeded');
+    await expect(escrow.releaseCancelledFunds(cancelled, await pre.getAddress(), 11n))
+      .to.be.revertedWithCustomError(escrow, 'CancelledFundsLimitExceeded');
     await expect(escrow.releaseExpense(cancelled, await pre.getAddress(), 10n))
       .to.be.revertedWithCustomError(escrow, 'GoalNotClosed');
-    await escrow.releaseSurplus(cancelled, await pre.getAddress(), 10n);
+    await escrow.releaseCancelledFunds(cancelled, await pre.getAddress(), 10n);
 
     const cancelledUsdc = ethers.id('cancelled-usdc');
     await escrow.createGoal(
@@ -676,9 +676,9 @@ describe('PREcommunityEscrowV1', () => {
     );
     await escrow.connect(sponsor).contribute(cancelledUsdc, await usdc.getAddress(), 2_000_000n, false);
     await escrow.cancelGoal(cancelledUsdc);
-    await expect(escrow.releaseSurplus(cancelledUsdc, await usdc.getAddress(), 2_000_001n))
-      .to.be.revertedWithCustomError(escrow, 'SurplusLimitExceeded');
-    await escrow.releaseSurplus(cancelledUsdc, await usdc.getAddress(), 2_000_000n);
+    await expect(escrow.releaseCancelledFunds(cancelledUsdc, await usdc.getAddress(), 2_000_001n))
+      .to.be.revertedWithCustomError(escrow, 'CancelledFundsLimitExceeded');
+    await escrow.releaseCancelledFunds(cancelledUsdc, await usdc.getAddress(), 2_000_000n);
 
     expect(await pre.balanceOf(recipient.address)).to.equal(ethers.parseEther('140'));
     expect(await pre.balanceOf(treasury.address)).to.equal(10n);
@@ -690,7 +690,7 @@ describe('PREcommunityEscrowV1', () => {
     await escrow.connect(sponsor).contribute(goalId, await pre.getAddress(), 10n, false);
     await escrow.cancelGoal(goalId);
 
-    await expect(escrow.connect(stranger).releaseSurplus(goalId, await pre.getAddress(), 1n))
+    await expect(escrow.connect(stranger).releaseCancelledFunds(goalId, await pre.getAddress(), 1n))
       .to.be.revertedWithCustomError(escrow, 'UnauthorizedRelease');
     expect(await escrow.accountedByToken(await pre.getAddress())).to.equal(10n);
   });
@@ -708,7 +708,7 @@ describe('PREcommunityEscrowV1', () => {
 
     const state = await escrow.goal(goalId);
     expect(state.usdcReleasedExpense).to.equal(contributed);
-    expect(state.usdcReleasedSurplus).to.equal(0n);
+    expect(state.usdcReleasedCancelledFunds).to.equal(0n);
     expect(await usdc.balanceOf(recipient.address)).to.equal(contributed);
     expect(await escrow.accountedByToken(await usdc.getAddress())).to.equal(0n);
     expect(await escrow.accountedByToken(await pre.getAddress())).to.equal(0n);
@@ -799,9 +799,18 @@ describe('PREcommunityEscrowV1', () => {
     expect(await escrow.accountedByToken(await pre.getAddress())).to.equal(100n);
     await expect(escrow.connect(stranger).setGoalPayout(id, alternatePayout.address))
       .to.be.revertedWithCustomError(escrow, 'UnauthorizedPayoutController');
+    await expect(escrow.connect(owner).setGoalPayout(id, alternatePayout.address))
+      .to.be.revertedWithCustomError(escrow, 'UnauthorizedPayoutController');
+    await escrow.pause();
     await expect(escrow.connect(recipient).setGoalPayout(id, alternatePayout.address))
       .to.emit(escrow, 'GoalPayoutUpdated')
       .withArgs(id, recipient.address, alternatePayout.address);
+    expect((await escrow.goal(id)).recipient).to.equal(recipient.address);
+    await expect(escrow.connect(alternatePayout).setGoalPayout(id, stranger.address))
+      .to.be.revertedWithCustomError(escrow, 'UnauthorizedPayoutController');
+    await escrow.unpause();
+    await expect(escrow.connect(alternatePayout).releaseExpense(id, await pre.getAddress(), 100n))
+      .to.be.revertedWithCustomError(escrow, 'UnauthorizedRelease');
     await expect(escrow.connect(recipient).releaseExpense(id, await pre.getAddress(), 100n))
       .to.emit(escrow, 'ExpenseReleased')
       .withArgs(id, await pre.getAddress(), recipient.address, alternatePayout.address, 100n);
@@ -837,15 +846,24 @@ describe('PREcommunityEscrowV1', () => {
     await escrow.cancelGoal(id);
     await pre.setBlocked(treasury.address, true);
 
-    await expect(escrow.releaseSurplus(id, await pre.getAddress(), 100n))
+    await expect(escrow.releaseCancelledFunds(id, await pre.getAddress(), 100n))
       .to.be.revertedWithCustomError(pre, 'BlockedAddress');
     await expect(escrow.connect(stranger).setTreasuryPayout(alternatePayout.address))
       .to.be.revertedWithCustomError(escrow, 'UnauthorizedPayoutController');
+    await expect(escrow.connect(owner).setTreasuryPayout(alternatePayout.address))
+      .to.be.revertedWithCustomError(escrow, 'UnauthorizedPayoutController');
+    await escrow.pause();
     await expect(escrow.connect(treasury).setTreasuryPayout(alternatePayout.address))
       .to.emit(escrow, 'TreasuryPayoutUpdated')
       .withArgs(treasury.address, alternatePayout.address);
-    await expect(escrow.connect(treasury).releaseSurplus(id, await pre.getAddress(), 100n))
-      .to.emit(escrow, 'SurplusReleased')
+    expect(await escrow.TREASURY()).to.equal(treasury.address);
+    await expect(escrow.connect(alternatePayout).setTreasuryPayout(stranger.address))
+      .to.be.revertedWithCustomError(escrow, 'UnauthorizedPayoutController');
+    await escrow.unpause();
+    await expect(escrow.connect(alternatePayout).releaseCancelledFunds(id, await pre.getAddress(), 100n))
+      .to.be.revertedWithCustomError(escrow, 'UnauthorizedRelease');
+    await expect(escrow.connect(treasury).releaseCancelledFunds(id, await pre.getAddress(), 100n))
+      .to.emit(escrow, 'CancelledFundsReleased')
       .withArgs(id, await pre.getAddress(), treasury.address, alternatePayout.address, 100n);
     expect(await pre.balanceOf(alternatePayout.address)).to.equal(100n);
     expect(await escrow.accountedByToken(await pre.getAddress())).to.equal(0n);
@@ -1083,6 +1101,53 @@ describe('PREcommunityEscrowV1', () => {
       .to.be.revertedWithCustomError(escrow, 'ReentrancyGuardReentrantCall');
   });
 
+  it('rolls back an expense release when the token reenters during an outbound transfer', async () => {
+    const signers = await ethers.getSigners();
+    const owner = signers[0]!;
+    const sponsor = signers[1]!;
+    const recipient = signers[2]!;
+    const treasury = signers[3]!;
+    const Reentrant = await ethers.getContractFactory('MockReentrantERC20');
+    const pre = await Reentrant.deploy() as unknown as MockReentrantERC20;
+    const Token = await ethers.getContractFactory('MockERC20');
+    const usdc = await Token.deploy('USD Coin', 'USDC', 6) as unknown as MockERC20;
+    const Escrow = await ethers.getContractFactory('PREcommunityEscrowV1');
+    const escrow = await Escrow.deploy(
+      owner.address,
+      await pre.getAddress(),
+      await usdc.getAddress(),
+      treasury.address,
+    ) as unknown as PREcommunityEscrowV1;
+    const escrowAddress = await escrow.getAddress();
+    const preAddress = await pre.getAddress();
+    const id = ethers.id('outbound-reentrant-release');
+
+    await escrow.createGoal(
+      id,
+      recipient.address,
+      100n,
+      0n,
+      await futureDeadline(),
+      'Outbound reentrancy',
+      '',
+      '',
+    );
+    await pre.mint(sponsor.address, 100n);
+    await pre.connect(sponsor).approve(escrowAddress, 100n);
+    await escrow.connect(sponsor).contribute(id, preAddress, 100n, false);
+    await escrow.closeGoal(id);
+
+    await pre.configure(escrowAddress, id);
+    await expect(escrow.connect(recipient).releaseExpense(id, preAddress, 100n))
+      .to.be.revertedWithCustomError(escrow, 'ReentrancyGuardReentrantCall');
+
+    const state = await escrow.goal(id);
+    expect(state.preReleasedExpense).to.equal(0n);
+    expect(await escrow.accountedByToken(preAddress)).to.equal(100n);
+    expect(await pre.balanceOf(escrowAddress)).to.equal(100n);
+    expect(await pre.balanceOf(recipient.address)).to.equal(0n);
+  });
+
   it('blocks a token callback from closing a goal during contribution', async () => {
     const signers = await ethers.getSigners();
     const owner = signers[0]!;
@@ -1118,15 +1183,17 @@ describe('PREcommunityEscrowV1', () => {
     expect(await pre.balanceOf(await escrow.getAddress())).to.equal(0n);
   });
 
-  it('settles every contribution for the beneficiary regardless of the target', async () => {
+  it('settles every contribution for the beneficiary regardless of the target', async function () {
+    this.timeout(60_000);
     await fc.assert(fc.asyncProperty(fc.bigInt({ min: 1n, max: ethers.parseEther('250') }), async (amount) => {
-      const { sponsor, recipient, pre, escrow, goalId } = await fixture();
+      // Reset balances and goal state without redeploying the instrumented contracts for every sample.
+      const { sponsor, recipient, pre, escrow, goalId } = await hardhatConnection.networkHelpers.loadFixture(fixture);
       await escrow.connect(sponsor).contribute(goalId, await pre.getAddress(), amount, false);
       await escrow.closeGoal(goalId);
       await escrow.connect(recipient).releaseExpense(goalId, await pre.getAddress(), amount);
       const state = await escrow.goal(goalId);
       expect(state.preReleasedExpense).to.equal(amount);
-      expect(state.preReleasedSurplus).to.equal(0n);
+      expect(state.preReleasedCancelledFunds).to.equal(0n);
       expect(await pre.balanceOf(recipient.address)).to.equal(amount);
       expect(await escrow.accountedByToken(await pre.getAddress())).to.equal(0n);
     }), { numRuns: 40 });
@@ -1161,13 +1228,13 @@ describe('PREcommunityEscrowV1', () => {
       .to.be.revertedWithCustomError(escrow, 'EnforcedPause');
     await expect(escrow.releaseExpense(goalId, tokenAddress, 1n))
       .to.be.revertedWithCustomError(escrow, 'EnforcedPause');
-    await expect(escrow.releaseSurplus(goalId, tokenAddress, 1n))
+    await expect(escrow.releaseCancelledFunds(goalId, tokenAddress, 1n))
       .to.be.revertedWithCustomError(escrow, 'EnforcedPause');
     await expect(escrow.recoverExcessToken(tokenAddress, stranger.address, 1n))
       .to.be.revertedWithCustomError(escrow, 'EnforcedPause');
 
     expect((await escrow.goal(goalId)).preReleasedExpense).to.equal(0n);
-    expect((await escrow.goal(goalId)).preReleasedSurplus).to.equal(0n);
+    expect((await escrow.goal(goalId)).preReleasedCancelledFunds).to.equal(0n);
     expect((await escrow.goal(openGoalId)).status).to.equal(1n);
     expect(await escrow.accountedByToken(tokenAddress)).to.equal(30n);
     expect(await pre.balanceOf(await escrow.getAddress())).to.equal(35n);

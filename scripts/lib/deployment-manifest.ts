@@ -1,11 +1,18 @@
 import path from 'node:path';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import type { DeploymentNetwork } from './deployer';
+
+const projectRootPath = fileURLToPath(new URL('../../', import.meta.url));
+
+export const DEPLOYMENT_RELEASE = 'escrow' as const;
+export const DEPLOYMENT_MANIFEST_SCHEMA = 'precommunity.deployment.v3' as const;
 
 export type DeploymentManifestStage = 'pending' | 'confirmed' | 'failed';
 
 export interface DeploymentManifest {
-  schema: 'precommunity.deployment.v2';
+  schema: typeof DEPLOYMENT_MANIFEST_SCHEMA;
+  release: typeof DEPLOYMENT_RELEASE;
   stage: DeploymentManifestStage;
   network: string;
   chainId: number;
@@ -38,6 +45,7 @@ export interface DeploymentManifest {
 
 export type DeploymentIntent = Pick<
   DeploymentManifest,
+  | 'release'
   | 'network'
   | 'chainId'
   | 'requiredConfirmations'
@@ -51,7 +59,11 @@ export type DeploymentIntent = Pick<
 >;
 
 export function deploymentManifestPathFor(deploymentNetwork: DeploymentNetwork): string {
-  return path.resolve(__dirname, '..', '..', '.deployments', `${deploymentNetwork.manifestName}.json`);
+  return path.resolve(
+    projectRootPath,
+    '.deployments',
+    `${deploymentNetwork.manifestName}.${DEPLOYMENT_RELEASE}.json`,
+  );
 }
 
 function isFileNotFound(error: unknown): boolean {
@@ -78,7 +90,9 @@ export async function readDeploymentManifest(filePath: string): Promise<Deployme
     typeof manifest !== 'object'
     || manifest === null
     || !('schema' in manifest)
-    || manifest.schema !== 'precommunity.deployment.v2'
+    || manifest.schema !== DEPLOYMENT_MANIFEST_SCHEMA
+    || !('release' in manifest)
+    || manifest.release !== DEPLOYMENT_RELEASE
     || !('stage' in manifest)
     || !['pending', 'confirmed', 'failed'].includes(String(manifest.stage))
   ) {

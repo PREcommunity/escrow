@@ -9,6 +9,8 @@ import { estimateDeploymentGasBudget } from './lib/deployment-gas';
 import {
   acquireDeploymentLock,
   assertDeploymentManifestMatches,
+  DEPLOYMENT_MANIFEST_SCHEMA,
+  DEPLOYMENT_RELEASE,
   deploymentManifestPathFor,
   type DeploymentIntent,
   type DeploymentManifest,
@@ -17,11 +19,13 @@ import {
 } from './lib/deployment-manifest';
 import {
   assertInitialOwnerIsDeployer,
+  deploymentEnvironmentKey,
   readDeploymentAddresses,
   readSafeAddress,
   validateDeploymentAddresses,
   validateSafeAddress,
 } from './lib/deployment-validation';
+import { readRpcValueWithRetry } from './lib/rpc-read-retry';
 
 const requiredConfirmationsByNetwork = {
   'base-sepolia': 2,
@@ -29,6 +33,7 @@ const requiredConfirmationsByNetwork = {
 } as const;
 
 const confirmationPollIntervalMs = 4_000;
+const transactionVisibilityAttempts = 30;
 
 async function observedConfirmations(receipt: TransactionReceipt): Promise<number> {
   const latestBlock = await ethers.provider.getBlockNumber();
@@ -108,10 +113,23 @@ async function confirmDeployment(
     );
   }
 
-  const transaction = await ethers.provider.getTransaction(manifest.transactionHash);
+  const transaction = await readRpcValueWithRetry(
+    () => ethers.provider.getTransaction(manifest.transactionHash),
+    {
+      attempts: transactionVisibilityAttempts,
+      intervalMs: confirmationPollIntervalMs,
+      onMiss: (attempt) => {
+        if (attempt === 1) {
+          process.stderr.write(
+            `Recorded deployment transaction ${manifest.transactionHash} is not visible through this RPC yet; waiting for propagation.\n`,
+          );
+        }
+      },
+    },
+  );
   if (!transaction) {
     throw new Error(
-      `RPC cannot find recorded deployment transaction ${manifest.transactionHash}; refusing to send another deployment transaction.`,
+      `RPC did not expose recorded deployment transaction ${manifest.transactionHash} after the propagation wait. The pending manifest was retained and no second deployment transaction was sent.`,
     );
   }
   assertDeploymentTransactionMatches(transaction, manifest);
@@ -153,7 +171,7 @@ async function main() {
   const connectedNetwork = await ethers.provider.getNetwork();
   assertConnectedChainId(deploymentNetwork, connectedNetwork.chainId);
 
-  const values = readDeploymentAddresses();
+  const values = readDeploymentAddresses(deploymentNetwork);
   const safeAddress = readSafeAddress(deploymentNetwork);
   const [tokenValidation] = await Promise.all([
     validateDeploymentAddresses(deploymentNetwork, values),
@@ -161,7 +179,11 @@ async function main() {
   ]);
 
   const deployer = await loadDeployer(deploymentNetwork);
-  assertInitialOwnerIsDeployer(deployer.address, values.OWNER_ADDRESS);
+  assertInitialOwnerIsDeployer(
+    deployer.address,
+    values.OWNER_ADDRESS,
+    deploymentEnvironmentKey(deploymentNetwork, 'OWNER_ADDRESS'),
+  );
   const factory = await ethers.getContractFactory('PREcommunityEscrowV1', deployer);
   const constructorArguments = [
     values.OWNER_ADDRESS,
@@ -176,6 +198,7 @@ async function main() {
 
   const requiredConfirmations = requiredConfirmationsByNetwork[deploymentNetwork.manifestName];
   const intent: DeploymentIntent = {
+    release: DEPLOYMENT_RELEASE,
     network: deploymentNetwork.manifestName,
     chainId: deploymentNetwork.chainId,
     requiredConfirmations,
@@ -225,7 +248,7 @@ async function main() {
       const escrowAddress = ethers.getAddress(await escrow.getAddress());
       const now = new Date().toISOString();
       manifest = {
-        schema: 'precommunity.deployment.v2',
+        schema: DEPLOYMENT_MANIFEST_SCHEMA,
         stage: 'pending',
         ...intent,
         escrowAddress,

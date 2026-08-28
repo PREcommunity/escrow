@@ -1,23 +1,21 @@
 import { ethers, network } from './lib/hardhat-runtime';
 import type { PREcommunityEscrowV1 } from '../typechain-types';
 import { assertConnectedChainId, loadDeployer, resolveDeploymentNetwork } from './lib/deployer';
-import { assertInitialOwnerIsDeployer, readSafeAddress, validateSafeAddress } from './lib/deployment-validation';
+import {
+  assertInitialOwnerIsDeployer,
+  deploymentEnvironmentKey,
+  readRequiredDeploymentAddress,
+  readSafeAddress,
+  validateSafeAddress,
+} from './lib/deployment-validation';
 import { buildSafeTransactionPayload } from './lib/safe-transaction';
-
-function requiredAddress(key: 'ESCROW_ADDRESS' | 'OWNER_ADDRESS'): string {
-  const value = process.env[key];
-  if (!value || !ethers.isAddress(value) || value === ethers.ZeroAddress) {
-    throw new Error(`${key} must be a non-zero public address.`);
-  }
-  return ethers.getAddress(value);
-}
 
 async function main() {
   const deploymentNetwork = resolveDeploymentNetwork(network.name, network.config.chainId);
   const connectedNetwork = await ethers.provider.getNetwork();
   assertConnectedChainId(deploymentNetwork, connectedNetwork.chainId);
-  const escrowAddress = requiredAddress('ESCROW_ADDRESS');
-  const initialOwner = requiredAddress('OWNER_ADDRESS');
+  const escrowAddress = readRequiredDeploymentAddress(deploymentNetwork, 'ESCROW_ADDRESS');
+  const initialOwner = readRequiredDeploymentAddress(deploymentNetwork, 'OWNER_ADDRESS');
   const safeAddress = readSafeAddress(deploymentNetwork);
   if (!safeAddress) throw new Error('SAFE_ADDRESS is required for an ownership handoff.');
 
@@ -80,7 +78,11 @@ async function main() {
 
   if (pendingOwner === ethers.ZeroAddress) {
     const deployer = await loadDeployer(deploymentNetwork);
-    assertInitialOwnerIsDeployer(deployer.address, initialOwner);
+    assertInitialOwnerIsDeployer(
+      deployer.address,
+      initialOwner,
+      deploymentEnvironmentKey(deploymentNetwork, 'OWNER_ADDRESS'),
+    );
     const writableEscrow = escrow.connect(deployer) as PREcommunityEscrowV1;
     const transaction = await writableEscrow.transferOwnership(safeAddress);
     const receipt = await transaction.wait();

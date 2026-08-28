@@ -1,15 +1,8 @@
 import { ethers, network } from './lib/hardhat-runtime';
 import type { PREcommunityEscrowV1 } from '../typechain-types';
 import { assertConnectedChainId, loadDeployer, resolveDeploymentNetwork } from './lib/deployer';
+import { readRequiredDeploymentAddress, readSafeAddress } from './lib/deployment-validation';
 import { buildSafeTransactionPayload } from './lib/safe-transaction';
-
-function requiredAddress(key: 'ESCROW_ADDRESS' | 'GOAL_MANAGER_ADDRESS'): string {
-  const value = process.env[key];
-  if (!value || !ethers.isAddress(value) || value === ethers.ZeroAddress) {
-    throw new Error(`${key} must be a non-zero public address.`);
-  }
-  return ethers.getAddress(value);
-}
 
 function requiredEnabledState(): boolean {
   const value = process.env.GOAL_MANAGER_ENABLED;
@@ -23,8 +16,8 @@ async function main() {
   const actualNetwork = await ethers.provider.getNetwork();
   assertConnectedChainId(deploymentNetwork, actualNetwork.chainId);
 
-  const escrowAddress = requiredAddress('ESCROW_ADDRESS');
-  const managerAddress = requiredAddress('GOAL_MANAGER_ADDRESS');
+  const escrowAddress = readRequiredDeploymentAddress(deploymentNetwork, 'ESCROW_ADDRESS');
+  const managerAddress = readRequiredDeploymentAddress(deploymentNetwork, 'GOAL_MANAGER_ADDRESS');
   const enabled = requiredEnabledState();
   if (await ethers.provider.getCode(escrowAddress) === '0x') {
     throw new Error('ESCROW_ADDRESS does not contain deployed contract code.');
@@ -40,12 +33,12 @@ async function main() {
     readOnlyEscrow.goalManagers(managerAddress),
     ethers.provider.getCode(owner),
   ]);
-  const configuredSafe = process.env.SAFE_ADDRESS?.trim();
+  const configuredSafe = readSafeAddress(deploymentNetwork);
   if (ownerCode !== '0x') {
     if (!configuredSafe && deploymentNetwork.manifestName === 'base') {
       throw new Error('SAFE_ADDRESS is required for a Base mainnet Safe transaction payload.');
     }
-    if (configuredSafe && (!ethers.isAddress(configuredSafe) || ethers.getAddress(configuredSafe) !== owner)) {
+    if (configuredSafe && ethers.getAddress(configuredSafe) !== owner) {
       throw new Error(`SAFE_ADDRESS must match the current escrow owner ${owner}.`);
     }
   }

@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { ethers } from '../scripts/lib/hardhat-runtime';
+import { ethers, hardhatRuntime } from '../scripts/lib/hardhat-runtime';
 import type { PREcommunityEscrowV1 } from '../typechain-types';
 import {
   type DeploymentAddresses,
@@ -14,6 +14,8 @@ import {
 } from '../scripts/lib/deployment-gas';
 import {
   assertDeploymentManifestMatches,
+  DEPLOYMENT_MANIFEST_SCHEMA,
+  DEPLOYMENT_RELEASE,
   type DeploymentIntent,
   type DeploymentManifest,
 } from '../scripts/lib/deployment-manifest';
@@ -23,7 +25,12 @@ import {
   normalizeImmutableReferences,
 } from '../scripts/lib/runtime-bytecode';
 import { buildSafeTransactionPayload } from '../scripts/lib/safe-transaction';
+import { readRpcValueWithRetry } from '../scripts/lib/rpc-read-retry';
 import { readCompiledContract } from '../scripts/lib/build-info';
+import {
+  readVerificationAddresses,
+  verificationConstructorArguments,
+} from '../scripts/lib/verification-config';
 
 describe('local deployment script checks', () => {
   async function localDeploymentFixture() {
@@ -56,6 +63,7 @@ describe('local deployment script checks', () => {
 
   function deploymentIntent(): DeploymentIntent {
     return {
+      release: DEPLOYMENT_RELEASE,
       network: 'base-sepolia',
       chainId: 84532,
       requiredConfirmations: 2,
@@ -71,7 +79,7 @@ describe('local deployment script checks', () => {
 
   function deploymentManifest(intent: DeploymentIntent): DeploymentManifest {
     return {
-      schema: 'precommunity.deployment.v2',
+      schema: DEPLOYMENT_MANIFEST_SCHEMA,
       stage: 'pending',
       ...intent,
       escrowAddress: '0x0000000000000000000000000000000000000006',
@@ -106,6 +114,23 @@ describe('local deployment script checks', () => {
       .to.throw('DEPLOYMENT_CHECK_STAGE must be exactly pre-handoff or final.');
   });
 
+  it('builds source-verification constructor arguments in deployment order', () => {
+    const values = readVerificationAddresses(resolveDeploymentNetwork('testnet', 84532), {
+      ESCROW_ADDRESS_TESTNET: '0x0000000000000000000000000000000000000001',
+      PRE_ADDRESS_TESTNET: '0x0000000000000000000000000000000000000002',
+      USDC_ADDRESS_TESTNET: '0x0000000000000000000000000000000000000003',
+      OWNER_ADDRESS_TESTNET: '0x0000000000000000000000000000000000000004',
+      TREASURY_ADDRESS_TESTNET: '0x0000000000000000000000000000000000000005',
+    });
+
+    expect(verificationConstructorArguments(values)).to.deep.equal([
+      values.OWNER_ADDRESS,
+      values.PRE_ADDRESS,
+      values.USDC_ADDRESS,
+      values.TREASURY_ADDRESS,
+    ]);
+  });
+
   it('adds a rounded-up deployment gas margin and computes a maximum cost', () => {
     expect(addGasMargin(1_000_000n)).to.equal(1_200_000n);
     expect(addGasMargin(1n)).to.equal(2n);
@@ -120,6 +145,42 @@ describe('local deployment script checks', () => {
       .to.throw('RPC did not return a usable deployment gas price.');
     expect(() => selectMaximumFeePerGas(0n, 10n))
       .to.throw('RPC did not return a usable deployment gas price.');
+  });
+
+  it('waits for an accepted transaction to become visible through an RPC load balancer', async () => {
+    const responses = [null, null, 'visible'];
+    const waits: number[] = [];
+    const misses: number[] = [];
+
+    const result = await readRpcValueWithRetry(
+      async () => responses.shift() ?? null,
+      {
+        attempts: 3,
+        intervalMs: 4_000,
+        wait: async (milliseconds) => { waits.push(milliseconds); },
+        onMiss: (attempt) => { misses.push(attempt); },
+      },
+    );
+
+    expect(result).to.equal('visible');
+    expect(waits).to.deep.equal([4_000, 4_000]);
+    expect(misses).to.deep.equal([1, 2]);
+  });
+
+  it('keeps a missing RPC value unresolved without waiting after the final attempt', async () => {
+    const waits: number[] = [];
+
+    const result = await readRpcValueWithRetry(
+      async () => null,
+      {
+        attempts: 2,
+        intervalMs: 1,
+        wait: async (milliseconds) => { waits.push(milliseconds); },
+      },
+    );
+
+    expect(result).to.equal(null);
+    expect(waits).to.deep.equal([1]);
   });
 
   it('resumes only when a durable deployment manifest matches the current intent', () => {
@@ -193,6 +254,19 @@ describe('local deployment script checks', () => {
     expect(normalizeImmutableReferences(onchainBytecode, immutableReferences))
       .to.equal(normalizeImmutableReferences(localBytecode, immutableReferences));
     expect(await escrow.TREASURY()).to.equal(treasury.address);
+  });
+
+  it('keeps the production runtime below the EIP-170 contract-size limit', async function () {
+    if (hardhatRuntime.globalOptions.coverage) this.skip();
+
+    const compiled = await readCompiledContract(
+      'contracts/PREcommunityEscrowV1.sol',
+      'PREcommunityEscrowV1',
+    );
+    const runtimeBytes = compiled.evm.deployedBytecode.object.length / 2;
+
+    expect(runtimeBytes).to.be.greaterThan(0);
+    expect(runtimeBytes).to.be.lessThan(24_576);
   });
 
   it('builds acceptOwnership calldata and exercises the local two-step handoff', async () => {

@@ -1,12 +1,17 @@
-import 'dotenv/config';
+import { config as loadEnvironment } from 'dotenv';
 import hardhatToolboxMochaEthers from '@nomicfoundation/hardhat-toolbox-mocha-ethers';
 import { defineConfig } from 'hardhat/config';
+
+// Deployment configuration in the repository-local .env is authoritative. This prevents
+// stale variables exported by an interactive shell from silently changing constructor inputs.
+loadEnvironment({ override: true, quiet: true });
 
 export default defineConfig({
   plugins: [hardhatToolboxMochaEthers],
   solidity: {
     version: '0.8.36',
     settings: {
+      evmVersion: 'prague',
       optimizer: { enabled: true, runs: 500 },
       viaIR: true,
     },
