@@ -1,3 +1,5 @@
+verifyDepsBeforeRun: false
+
 minimumReleaseAge: 4320
 
 allowBuilds:

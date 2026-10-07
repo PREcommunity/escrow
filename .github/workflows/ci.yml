@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'codex/keyword-market-mainnet-*']
   pull_request:
 
 permissions:
@@ -31,5 +31,12 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint:sol
       - run: pnpm test
+      - name: Upload Keyword Market gas measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyword-market-gas-${{ github.sha }}-${{ github.run_attempt }}
+          path: reports/keyword-market-gas.json
+          if-no-files-found: warn
       - run: pnpm coverage
       - run: pnpm audit --audit-level high

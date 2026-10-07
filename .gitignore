@@ -6,6 +6,7 @@ artifacts
 cache
 coverage
 coverage.json
+reports/keyword-market-gas.json
 typechain-types
 types/ethers-contracts/
 .env
@@ -13,3 +14,4 @@ types/ethers-contracts/
 .keystore-mainnet
 .deployments/
 *.log
+.keystore*

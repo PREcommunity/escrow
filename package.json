@@ -20,9 +20,12 @@
     "deploy:test-tokens": "hardhat run scripts/deploy-test-tokens.ts",
     "preflight:escrow": "hardhat run scripts/preflight.ts",
     "deploy:escrow": "hardhat run scripts/deploy.ts",
+    "deploy:keyword-market": "hardhat run scripts/deploy-keyword-market.ts",
     "ownership:handoff": "hardhat run scripts/handoff-ownership.ts",
     "check:escrow": "hardhat run scripts/check-deployment.ts",
+    "check:keyword-market": "hardhat run scripts/check-keyword-market.ts",
     "verify:escrow": "hardhat run scripts/verify.ts",
+    "verify:keyword-market": "hardhat run scripts/verify-keyword-market.ts",
     "verify:sourcify": "hardhat run scripts/verify-sourcify.ts",
     "goal-manager:set": "hardhat run scripts/set-goal-manager.ts"
   },

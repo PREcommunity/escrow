@@ -1,0 +1,22 @@
+[
+  {
+    "input": "  BITCOIN—Poland!!! ",
+    "canonical": "bitcoin poland",
+    "keywordId": "0x23c8e1cf2843273e372cec65400cc60f428a3516c516321047d0a88968cc9bfe"
+  },
+  {
+    "input": "CAFÉ",
+    "canonical": "café",
+    "keywordId": "0x9513447e2d376aacd434727887590dd448cda8f2d30c4ace903d31fe209f8ad8"
+  },
+  {
+    "input": "Web3 / 2026",
+    "canonical": "web3 2026",
+    "keywordId": "0xae13f72dc0f77fa03d1095a70068ec6782bc9c82274bdf1b9e56786d12f76727"
+  },
+  {
+    "input": "Ethereum...Layer_2",
+    "canonical": "ethereum layer 2",
+    "keywordId": "0x0bcd978676529e052bf1d0a9585f037f3ebbaa525ea5b492407c416e6838c0d2"
+  }
+]

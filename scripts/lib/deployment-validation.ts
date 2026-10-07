@@ -88,15 +88,23 @@ export function assertInitialOwnerIsDeployer(
   }
 }
 
+export function validateCanonicalPreTokenAddress(
+  deploymentNetwork: DeploymentNetwork,
+  preAddress: string,
+): void {
+  if (deploymentNetwork.chainId === baseMainnetChainId && preAddress !== baseMainnetTokens.PRE_ADDRESS) {
+    throw new Error(`PRE_ADDRESS must be the canonical Base mainnet token ${baseMainnetTokens.PRE_ADDRESS}.`);
+  }
+}
+
 export function validateCanonicalTokenAddresses(
   deploymentNetwork: DeploymentNetwork,
   values: Pick<DeploymentAddresses, 'PRE_ADDRESS' | 'USDC_ADDRESS'>,
 ): void {
+  validateCanonicalPreTokenAddress(deploymentNetwork, values.PRE_ADDRESS);
   if (deploymentNetwork.chainId !== baseMainnetChainId) return;
-  for (const key of ['PRE_ADDRESS', 'USDC_ADDRESS'] as const) {
-    if (values[key] !== baseMainnetTokens[key]) {
-      throw new Error(`${key} must be the canonical Base mainnet token ${baseMainnetTokens[key]}.`);
-    }
+  if (values.USDC_ADDRESS !== baseMainnetTokens.USDC_ADDRESS) {
+    throw new Error(`USDC_ADDRESS must be the canonical Base mainnet token ${baseMainnetTokens.USDC_ADDRESS}.`);
   }
 }
 
