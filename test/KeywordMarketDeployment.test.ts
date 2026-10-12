@@ -8,6 +8,8 @@ import {
   assertKeywordMarketManifestMatches,
   assertKeywordMarketManifestNetwork,
   assertKeywordMarketRolloutState,
+  assertKeywordMarketPriceState,
+  readKeywordMarketExpectedPriceUpdater,
   assertKeywordMarketSafeConfiguration,
   KEYWORD_MARKET_MANIFEST_SCHEMA,
   keywordMarketManifestPath,
@@ -76,6 +78,9 @@ describe("Keyword Market deployment safeguards", () => {
       .deploy("Presearch", "PRE", 18);
     const market = await (await ethers.getContractFactory("PREKeywordMarketV1"))
       .deploy(owner!.address, await token.getAddress(), ethers.parseEther("1"), false);
+    await market.getFunction("setPriceUpdater")(owner!.address);
+    const quotedAt = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
+    await market.getFunction("updatePreUsdPrice")(ethers.parseEther("1"), quotedAt);
     const address = await market.getAddress();
     const keywordId = ethers.id("accounting-snapshot");
     await token.getFunction("mint")(staker!.address, ethers.parseEther("10"));
@@ -330,6 +335,26 @@ describe("Keyword Market deployment safeguards", () => {
     expect(() =>
       assertKeywordMarketRolloutState(false, deployer, deployer, "active"),
     ).not.to.throw();
+  });
+
+  it("allows bootstrap checks before a first quote and requires price readiness for activation", () => {
+    expect(parseKeywordMarketCheckStage("bootstrap")).to.equal("bootstrap");
+    for (const paused of [true, false]) {
+      expect(() => assertKeywordMarketRolloutState(paused, ZeroAddress, ZeroAddress, "bootstrap")).not.to.throw();
+    }
+    for (const stage of ["bootstrap", "rollout"] as const) {
+      expect(() => assertKeywordMarketPriceState(0n, 0n, ZeroAddress, stage)).not.to.throw();
+    }
+    expect(() => assertKeywordMarketPriceState(1n, 1n, deployer, "active", deployer)).not.to.throw();
+    for (const [price, timestamp, updater] of [[0n, 0n, deployer], [1n, 1n, ZeroAddress]] as const) {
+      expect(() => assertKeywordMarketPriceState(price, timestamp, updater, "active")).to.throw("active readiness");
+    }
+    expect(() => assertKeywordMarketPriceState(1n, 0n, deployer, "bootstrap")).to.throw("initialized together");
+    expect(() => assertKeywordMarketPriceState(1n, 1n, deployer, "active", safeAddress)).to.throw("expected updater");
+    expect(readKeywordMarketExpectedPriceUpdater(mainnet, {})).to.equal(undefined);
+    expect(readKeywordMarketExpectedPriceUpdater(testnet, { ADS_PRICE_UPDATER_ADDRESS: deployer })).to.equal(undefined);
+    expect(readKeywordMarketExpectedPriceUpdater(testnet, { ADS_PRICE_UPDATER_ADDRESS_TESTNET: deployer })).to.equal(deployer);
+    expect(() => readKeywordMarketExpectedPriceUpdater(mainnet, { ADS_PRICE_UPDATER_ADDRESS: "bad" })).to.throw("public address");
   });
 
   it("refuses to resume when durable network, constructor, sender or code intent differs", () => {

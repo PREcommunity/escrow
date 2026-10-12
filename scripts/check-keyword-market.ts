@@ -11,6 +11,8 @@ import {
 import {
   assertKeywordMarketManifestNetwork,
   assertKeywordMarketRolloutState,
+  assertKeywordMarketPriceState,
+  readKeywordMarketExpectedPriceUpdater,
   parseKeywordMarketCheckStage,
   readKeywordMarketExpectedOperator,
   readKeywordMarketAccounting,
@@ -61,6 +63,7 @@ async function main() {
     startPaused,
   );
   const expectedOperator = readKeywordMarketExpectedOperator(deploymentNetwork);
+  const expectedPriceUpdater = readKeywordMarketExpectedPriceUpdater(deploymentNetwork);
   const contractAddress = readRequiredDeploymentAddress(
     deploymentNetwork,
     "ADS_CONTRACT_ADDRESS",
@@ -110,6 +113,9 @@ async function main() {
     pre,
     operator,
     minimumStake,
+    preUsdPriceE18,
+    preUsdPriceQuotedAt,
+    priceUpdater,
     paused,
     [totalStaked, accruedFees, preBalance],
     deploymentLogs,
@@ -119,6 +125,9 @@ async function main() {
     market.getFunction("PRE").staticCall(readOverrides) as Promise<string>,
     market.getFunction("operator").staticCall(readOverrides) as Promise<string>,
     market.getFunction("minimumStake").staticCall(readOverrides) as Promise<bigint>,
+    market.getFunction("preUsdPriceE18").staticCall(readOverrides) as Promise<bigint>,
+    market.getFunction("preUsdPriceQuotedAt").staticCall(readOverrides) as Promise<bigint>,
+    market.getFunction("priceUpdater").staticCall(readOverrides) as Promise<string>,
     market.getFunction("paused").staticCall(readOverrides) as Promise<boolean>,
     readKeywordMarketAccounting(market, preToken, contractAddress, latestBlock),
     ethers.provider.getLogs({
@@ -141,6 +150,7 @@ async function main() {
     );
   }
   assertKeywordMarketRolloutState(paused, operator, expectedOperator, stage);
+  assertKeywordMarketPriceState(preUsdPriceE18, preUsdPriceQuotedAt, priceUpdater, stage, expectedPriceUpdater);
   if (totalStaked + accruedFees > preBalance) {
     throw new Error(
       "Keyword Market PRE balance does not cover stakes and accrued charges.",
@@ -206,6 +216,9 @@ async function main() {
         pendingOwner: ethers.getAddress(pendingOwner),
         operator: ethers.getAddress(operator),
         minimumStakeRaw: minimumStake.toString(),
+        preUsdPriceE18: preUsdPriceE18.toString(),
+        preUsdPriceQuotedAt: preUsdPriceQuotedAt.toString(),
+        priceUpdater: ethers.getAddress(priceUpdater),
         totalStakedRaw: totalStaked.toString(),
         accruedFeesRaw: accruedFees.toString(),
         preBalanceRaw: preBalance.toString(),
@@ -225,7 +238,9 @@ async function main() {
           operatorMatchesExpected: true,
           stakesAndAccruedCovered: true,
           pausedMatchesStage: true,
-          stakeEnabled: !paused,
+          priceInitialized: preUsdPriceE18 > 0n && preUsdPriceQuotedAt > 0n,
+          priceUpdaterConfigured: priceUpdater !== ethers.ZeroAddress,
+          stakeEnabled: !paused && preUsdPriceE18 > 0n,
         },
       },
       null,

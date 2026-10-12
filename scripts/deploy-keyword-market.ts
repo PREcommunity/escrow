@@ -251,6 +251,14 @@ async function main() {
       {
         ...confirmed,
         manifestPath,
+        activationRequiresStoredPrice: true,
+        nextSteps: [
+          "Run check:keyword-market with KEYWORD_MARKET_CHECK_STAGE=bootstrap.",
+          "Safe selects the separate publisher using setPriceUpdater(address).",
+          "Publisher stores the first PRE/USD quote using updatePreUsdPrice(uint256,uint64).",
+          ...(values.startPaused ? ["Safe calls unpause after readiness."] : []),
+          "Run check:keyword-market with KEYWORD_MARKET_CHECK_STAGE=active before switching the application.",
+        ],
         appEnvironment: {
           [deploymentEnvironmentKey(deploymentNetwork, "ADS_CONTRACT_ADDRESS")]:
             confirmed.contractAddress,

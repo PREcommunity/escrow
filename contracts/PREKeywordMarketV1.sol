@@ -7,6 +7,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract PREKeywordMarketV1 is Ownable2Step, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -17,6 +18,9 @@ contract PREKeywordMarketV1 is Ownable2Step, Pausable, ReentrancyGuard {
     uint256 public minimumStake;
     uint256 public totalStaked;
     uint256 public accruedFees;
+    uint256 public preUsdPriceE18;
+    uint64 public preUsdPriceQuotedAt;
+    address public priceUpdater;
 
     struct Position {
         uint256 amount;
@@ -24,6 +28,7 @@ contract PREKeywordMarketV1 is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 version;
         uint256 withdrawAvailableAt;
         uint256 requiredCoveragePre;
+        uint256 openingSequence;
     }
 
     struct StakingDetails {
@@ -35,6 +40,7 @@ contract PREKeywordMarketV1 is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     mapping(bytes32 keywordId => address[] stakers) private _stakers;
+    mapping(bytes32 keywordId => uint256 sequence) private _nextOpeningSequence;
     mapping(bytes32 chargeId => bool processed) public chargeProcessed;
     mapping(bytes32 keywordId => StakingDetails details) private _topStakes;
     mapping(bytes32 keywordId => mapping(address staker => Position position)) private _positions;
@@ -46,6 +52,10 @@ contract PREKeywordMarketV1 is Ownable2Step, Pausable, ReentrancyGuard {
     error UnstakePending();
     error InvalidChargeId();
     error InvalidOperator();
+    error InvalidPreUsdPrice();
+    error InvalidPreUsdPriceTimestamp();
+    error PreUsdPriceNotInitialized();
+    error UnauthorizedPriceUpdater(address account);
     error PositionMissing();
     error UnstakeNotRequested();
     error TransferAmountMismatch();
@@ -59,6 +69,8 @@ contract PREKeywordMarketV1 is Ownable2Step, Pausable, ReentrancyGuard {
     error InsufficientAccruedFees(uint256 requested,uint256 available);
 
     event AccruedWithdrawn(address indexed recipient,uint256 amountPre);
+    event PriceUpdaterUpdated(address indexed previousUpdater,address indexed newUpdater);
+    event PreUsdPriceUpdated(uint256 priceE18,uint64 quotedAt);
     event MinimumStakeUpdated(uint256 previousMinimum,uint256 newMinimum);
     event Unstaked(bytes32 indexed keywordId,address indexed staker,uint256 amountPre);
     event OperatorUpdated(address indexed previousOperator,address indexed newOperator);
@@ -129,8 +141,13 @@ contract PREKeywordMarketV1 is Ownable2Step, Pausable, ReentrancyGuard {
             if (amountPre < minimumStake) revert StakeBelowMinimum(amountPre, minimumStake);
             position.version += 1;
             position.requiredCoveragePre = minimumStake;
+            position.openingSequence = ++_nextOpeningSequence[keywordId];
         }
         uint256 newAmount = previousStake + amountPre;
+        uint256 priceE18 = preUsdPriceE18;
+        if (priceE18 == 0) revert PreUsdPriceNotInitialized();
+        uint256 requiredClickPre = Math.mulDiv(bidUsd, 1e30, priceE18);
+        if (newAmount < requiredClickPre) revert CoverageNotMet(newAmount, requiredClickPre);
         if (amountPre != 0) _receiveExact(amountPre);
 
         position.amount = newAmount;
@@ -255,6 +272,28 @@ contract PREKeywordMarketV1 is Ownable2Step, Pausable, ReentrancyGuard {
         emit OperatorUpdated(previousOperator, newOperator);
     }
 
+    function setPriceUpdater(address newUpdater) external onlyOwner {
+        address previousUpdater = priceUpdater;
+        priceUpdater = newUpdater;
+        emit PriceUpdaterUpdated(previousUpdater, newUpdater);
+    }
+
+    /// @notice Stores USD per PRE with 18 decimals; old positive quotes remain usable.
+    function updatePreUsdPrice(uint256 priceE18, uint64 quotedAt) external {
+        if (msg.sender != priceUpdater) revert UnauthorizedPriceUpdater(msg.sender);
+        if (priceE18 == 0) revert InvalidPreUsdPrice();
+        if (quotedAt == 0 || quotedAt > block.timestamp + 60 || quotedAt < preUsdPriceQuotedAt) {
+            revert InvalidPreUsdPriceTimestamp();
+        }
+        if (quotedAt == preUsdPriceQuotedAt) {
+            if (priceE18 != preUsdPriceE18) revert InvalidPreUsdPriceTimestamp();
+            return;
+        }
+        preUsdPriceE18 = priceE18;
+        preUsdPriceQuotedAt = quotedAt;
+        emit PreUsdPriceUpdated(priceE18, quotedAt);
+    }
+
     function setMinimumStake(uint256 newMinimumStake) external onlyOwner {
         if (newMinimumStake == 0) revert ZeroAmount();
         uint256 previousMinimum = minimumStake;
@@ -284,6 +323,7 @@ contract PREKeywordMarketV1 is Ownable2Step, Pausable, ReentrancyGuard {
         position.bidUsd = 0;
         position.requiredCoveragePre = 0;
         position.withdrawAvailableAt = 0;
+        position.openingSequence = 0;
     }
 
     function _emitPositionChanged(bytes32 keywordId, address staker, uint256 previousStake, Position storage position)
@@ -375,7 +415,9 @@ contract PREKeywordMarketV1 is Ownable2Step, Pausable, ReentrancyGuard {
     function _higher(bytes32 keywordId, address first, address second) private view returns (bool) {
         uint256 firstBid = _positions[keywordId][first].bidUsd;
         uint256 secondBid = _positions[keywordId][second].bidUsd;
-        return firstBid > secondBid || (firstBid == secondBid && uint160(first) < uint160(second));
+        return firstBid > secondBid
+            || (firstBid == secondBid
+                && _positions[keywordId][first].openingSequence < _positions[keywordId][second].openingSequence);
     }
 
     function _refreshTop(bytes32 keywordId) private {

@@ -16,7 +16,7 @@ const pre = (value: string) => ethers.parseEther(value);
 const bid = (value: number) => BigInt(value) * 1_000_000n;
 
 describe("PREKeywordMarketV1", () => {
-  async function deploy(token?: string, minimum = pre("1"), activate = true, startPaused = true) {
+  async function deploy(token?: string, minimum = pre("1"), activate = true, startPaused = true, initializePrice = true) {
     const signers = await ethers.getSigners();
     const owner = signers[0]!;
     const operator = signers[1]!;
@@ -35,6 +35,12 @@ describe("PREKeywordMarketV1", () => {
       minimum,
       startPaused,
     )) as unknown as PREKeywordMarketV1;
+    if (initializePrice) {
+      await market.connect(owner).setPriceUpdater(owner.address);
+      const quotedAt = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
+      // Heap/token tests use raw-unit deposits; coverage has dedicated realistic-price cases.
+      await market.connect(owner).updatePreUsdPrice(10n ** 40n, quotedAt);
+    }
     if (activate) {
       await market.connect(owner).setOperator(operator.address);
       if (startPaused) await market.connect(owner).unpause();
@@ -95,6 +101,152 @@ describe("PREKeywordMarketV1", () => {
       }
     });
   }
+
+  async function setQuote(market: PREKeywordMarketV1, owner: Signer, priceE18: bigint) {
+    const quotedAt = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
+    await market.connect(owner).updatePreUsdPrice(priceE18, quotedAt);
+    return quotedAt;
+  }
+
+  it("requires a first quote even for direct staking and leaves tokens untouched", async () => {
+    const { alice, payment, market, keywordId } = await deploy(undefined, pre("1"), true, true, false);
+    expect(await market.preUsdPriceE18()).to.equal(0n);
+    expect(await market.preUsdPriceQuotedAt()).to.equal(0n);
+    expect(await market.priceUpdater()).to.equal(ethers.ZeroAddress);
+    const balance = await payment!.balanceOf(alice.address);
+    await expect(stake(market, alice, keywordId, pre("100"), 90_000n))
+      .to.be.revertedWithCustomError(market, "PreUsdPriceNotInitialized");
+    expect(await payment!.balanceOf(alice.address)).to.equal(balance);
+    expect(await market.totalStaked()).to.equal(0n);
+    expect((await market.stakeDetailsOf(keywordId, alice.address)).positionVersion).to.equal(0n);
+  });
+
+  it("blocks insufficient direct deposits before token transfer and accepts exact click coverage", async () => {
+    const { owner, alice, payment, market, keywordId } = await deploy();
+    await setQuote(market, owner, pre("0.0005"));
+    const balance = await payment!.balanceOf(alice.address);
+    await expect(stake(market, alice, keywordId, pre("100"), 90_000n))
+      .to.be.revertedWithCustomError(market, "CoverageNotMet").withArgs(pre("100"), pre("180"));
+    expect(await payment!.balanceOf(alice.address)).to.equal(balance);
+    expect(await market.totalStaked()).to.equal(0n);
+    await payment!.mint(alice.address, pre("200"));
+    await stake(market, alice, keywordId, pre("180"), 90_000n);
+    const position = await market.stakeDetailsOf(keywordId, alice.address);
+    expect(position.amount).to.equal(pre("180"));
+    expect(position.requiredCoveragePre).to.equal(pre("1"));
+    expect(position.eligible).to.equal(true);
+  });
+
+  it("counts the existing balance for top-ups and validates bid-only changes", async () => {
+    const { owner, alice, payment, market, keywordId } = await deploy();
+    await setQuote(market, owner, pre("0.0005"));
+    await payment!.mint(alice.address, pre("200"));
+    await stake(market, alice, keywordId, pre("100"), 50_000n);
+    await expect(stake(market, alice, keywordId, pre("79"), 90_000n))
+      .to.be.revertedWithCustomError(market, "CoverageNotMet").withArgs(pre("179"), pre("180"));
+    await stake(market, alice, keywordId, pre("80"), 90_000n);
+    await stake(market, alice, keywordId, 0n, 90_000n);
+    await expect(stake(market, alice, keywordId, 0n, 90_001n))
+      .to.be.revertedWithCustomError(market, "CoverageNotMet").withArgs(pre("180"), pre("180.002"));
+    expect((await market.stakeDetailsOf(keywordId, alice.address)).bidUsd).to.equal(90_000n);
+  });
+
+  it("restricts quote publishing to the owner-selected updater and permits revocation", async () => {
+    const { owner, alice, operator, market } = await deploy();
+    await expect(market.connect(alice).setPriceUpdater(operator.address))
+      .to.be.revertedWithCustomError(market, "OwnableUnauthorizedAccount").withArgs(alice.address);
+    await expect(market.connect(owner).setPriceUpdater(operator.address))
+      .to.emit(market, "PriceUpdaterUpdated").withArgs(owner.address, operator.address);
+    const quotedAt = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
+    for (const signer of [alice, owner]) {
+      await expect(market.connect(signer).updatePreUsdPrice(pre("0.001"), quotedAt))
+        .to.be.revertedWithCustomError(market, "UnauthorizedPriceUpdater").withArgs(signer.address);
+    }
+    await expect(market.connect(operator).updatePreUsdPrice(pre("0.001"), quotedAt))
+      .to.emit(market, "PreUsdPriceUpdated").withArgs(pre("0.001"), quotedAt);
+    await expect(market.connect(owner).setPriceUpdater(ethers.ZeroAddress))
+      .to.emit(market, "PriceUpdaterUpdated").withArgs(operator.address, ethers.ZeroAddress);
+    await expect(market.connect(operator).updatePreUsdPrice(pre("0.001"), quotedAt))
+      .to.be.revertedWithCustomError(market, "UnauthorizedPriceUpdater").withArgs(operator.address);
+  });
+
+  it("rejects invalid quotes, accepts monotonic updates and treats an exact replay as a no-op", async () => {
+    const { owner, market } = await deploy();
+    const quotedAt = await setQuote(market, owner, pre("0.0005"));
+    await expect(market.connect(owner).updatePreUsdPrice(0n, quotedAt))
+      .to.be.revertedWithCustomError(market, "InvalidPreUsdPrice");
+    for (const timestamp of [0n, quotedAt - 1n, quotedAt + 3_600n]) {
+      await expect(market.connect(owner).updatePreUsdPrice(pre("0.0005"), timestamp))
+        .to.be.revertedWithCustomError(market, "InvalidPreUsdPriceTimestamp");
+    }
+    await expect(market.connect(owner).updatePreUsdPrice(pre("0.0006"), quotedAt))
+      .to.be.revertedWithCustomError(market, "InvalidPreUsdPriceTimestamp");
+    const replay = await decodedEvents(market, await market.connect(owner).updatePreUsdPrice(pre("0.0005"), quotedAt));
+    expect(replay).to.have.length(0);
+    expect(await market.preUsdPriceE18()).to.equal(pre("0.0005"));
+    expect(await market.preUsdPriceQuotedAt()).to.equal(quotedAt);
+    const next = await setQuote(market, owner, pre("0.0006"));
+    expect(next).to.be.greaterThan(quotedAt);
+    expect(await market.preUsdPriceE18()).to.equal(pre("0.0006"));
+  });
+
+  it("accepts the provider clock tolerance boundary and rejects the next second", async () => {
+    const { owner, market } = await deploy();
+    const now = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
+    await ethers.provider.send("evm_setNextBlockTimestamp", [Number(now + 1n)]);
+    await market.connect(owner).updatePreUsdPrice(pre("0.0005"), now + 61n);
+    expect(await market.preUsdPriceQuotedAt()).to.equal(now + 61n);
+    await ethers.provider.send("evm_setNextBlockTimestamp", [Number(now + 2n)]);
+    await expect(market.connect(owner).updatePreUsdPrice(pre("0.0006"), now + 63n))
+      .to.be.revertedWithCustomError(market, "InvalidPreUsdPriceTimestamp");
+  });
+
+  it("keeps older quotes usable without changing rank or the original eligibility threshold", async () => {
+    const { owner, operator, alice, bob, market, keywordId } = await deploy();
+    await stake(market, alice, keywordId, pre("10"), 90_000n);
+    await stake(market, bob, keywordId, pre("10"), 80_000n);
+    const before = await market.topStakeOf(keywordId);
+    const quotedAt = await setQuote(market, owner, pre("0.0005"));
+    expect(await market.topStakeOf(keywordId)).to.deep.equal(before);
+    expect((await market.stakeDetailsOf(keywordId, alice.address)).eligible).to.equal(true);
+    await advanceTo(quotedAt + 31_536_000n);
+    await expect(stake(market, alice, keywordId, 0n, 90_000n))
+      .to.be.revertedWithCustomError(market, "CoverageNotMet").withArgs(pre("10"), pre("180"));
+    await stake(market, alice, keywordId, 0n, 5_000n);
+    await market.connect(owner).setPriceUpdater(ethers.ZeroAddress);
+    await market.connect(operator).chargeStake(keywordId, alice.address, 1n, pre("1"), ethers.id("old-price-charge"));
+    await market.connect(owner).withdrawAccrued(owner.address, pre("1"));
+    await market.connect(alice).requestUnstake(keywordId);
+    await advanceTo((await market.stakeDetailsOf(keywordId, alice.address)).withdrawAvailableAt);
+    await market.connect(alice).unstake(keywordId);
+    expect(await market.preUsdPriceQuotedAt()).to.equal(quotedAt);
+  });
+
+  it("matches integer floor billing for fractional quotes and full-width multiplication", async () => {
+    const { owner, alice, payment, market } = await deploy(undefined, 1n);
+    const vectors = [
+      { bidUsd: 100_000n, priceE18: 555_555_555_555_555n },
+      { bidUsd: 1n, priceE18: 3n * 10n ** 29n },
+      { bidUsd: ethers.MaxUint256, priceE18: ethers.MaxUint256 },
+    ];
+    for (const [index, vector] of vectors.entries()) {
+      await setQuote(market, owner, vector.priceE18);
+      const required = vector.bidUsd * 10n ** 30n / vector.priceE18;
+      const keyword = ethers.id(`rounding-${index}`);
+      if (required > 1n) {
+        await expect(stake(market, alice, keyword, required - 1n, vector.bidUsd))
+          .to.be.revertedWithCustomError(market, "CoverageNotMet").withArgs(required - 1n, required);
+      }
+      await payment!.mint(alice.address, required);
+      await stake(market, alice, keyword, required, vector.bidUsd);
+      expect(await market.positionOf(keyword, alice.address)).to.equal(required);
+    }
+    await setQuote(market, owner, 1n);
+    await expect(stake(market, alice, ethers.id("overflow-cost"), 1n, ethers.MaxUint256))
+      .to.be.revertedWithPanic(0x11);
+    await setQuote(market, owner, ethers.MaxUint256);
+    await stake(market, alice, ethers.id("zero-rounded-cost"), 1n, 1n);
+  });
 
   it("uses the application's canonical UTF-8 keyword hashes", () => {
     for (const vector of keywordHashVectors) {
@@ -239,8 +391,10 @@ describe("PREKeywordMarketV1", () => {
         eligible: boolean;
         withdrawal: bigint;
         version: bigint;
+        openingSequence: bigint;
       }
     >();
+    const openingSequences = new Map<string, bigint>();
     async function replay(transaction: ContractTransactionResponse) {
       const changes = (await decodedEvents(market, transaction)).filter(
         (event) => event.name === "PositionChanged",
@@ -249,6 +403,12 @@ describe("PREKeywordMarketV1", () => {
       for (const { args } of changes) {
         const key = `${args.keywordId}:${args.staker}`;
         expect(args.previousStake).to.equal(projected.get(key)?.amount ?? 0n);
+        let openingSequence = projected.get(key)?.openingSequence ?? 0n;
+        if (args.newStake === 0n) openingSequence = 0n;
+        else if (args.previousStake === 0n) {
+          openingSequence = (openingSequences.get(args.keywordId) ?? 0n) + 1n;
+          openingSequences.set(args.keywordId, openingSequence);
+        }
         projected.set(key, {
           keywordId: args.keywordId,
           staker: args.staker,
@@ -258,6 +418,7 @@ describe("PREKeywordMarketV1", () => {
           eligible: args.eligible,
           withdrawal: args.withdrawAvailableAt,
           version: args.positionVersion,
+          openingSequence,
         });
       }
       for (const position of projected.values()) {
@@ -278,7 +439,7 @@ describe("PREKeywordMarketV1", () => {
         );
         eligible.sort((left, right) =>
           left.bidUsd === right.bidUsd
-            ? BigInt(left.staker) < BigInt(right.staker)
+            ? left.openingSequence < right.openingSequence
               ? -1
               : 1
             : left.bidUsd > right.bidUsd
@@ -304,6 +465,7 @@ describe("PREKeywordMarketV1", () => {
     await replay(await stake(market, alice, otherKeyword, pre("4"), bid(1)));
     await replay(await stake(market, alice, keywordId, 0n, bid(4)));
     await replay(await stake(market, alice, keywordId, pre("2"), bid(4)));
+    await replay(await stake(market, bob, keywordId, 0n, bid(4)));
     await replay(
       await market
         .connect(operator)
@@ -346,7 +508,7 @@ describe("PREKeywordMarketV1", () => {
     expect(
       duplicate.filter((event) => event.name === "PositionChanged"),
     ).to.have.length(0);
-    await replay(await stake(market, alice, keywordId, pre("2"), bid(6)));
+    await replay(await stake(market, alice, keywordId, pre("2"), bid(5)));
   });
 
   it("matches an independent position model through seeded heap mutations and complete exits", async function () {
@@ -378,7 +540,9 @@ describe("PREKeywordMarketV1", () => {
           coverage: 0n,
           withdrawal: 0n,
           version: 0n,
+          openingSequence: 0n,
         }));
+        let openingSequence = 0n;
         let fees = 0n;
         for (const participant of participants) {
           await payment!.mint(participant.address, 1_000n);
@@ -398,7 +562,7 @@ describe("PREKeywordMarketV1", () => {
             })
             .sort((left, right) =>
               left.bidUsd === right.bidUsd
-                ? BigInt(left.address) < BigInt(right.address)
+                ? left.openingSequence < right.openingSequence
                   ? -1
                   : 1
                 : left.bidUsd > right.bidUsd
@@ -444,6 +608,7 @@ describe("PREKeywordMarketV1", () => {
             if (position.amount === 0n) {
               position.version += 1n;
               position.coverage = 1n;
+              position.openingSequence = ++openingSequence;
             }
             position.amount += deposit;
             position.bidUsd = bid(command.value);
@@ -473,6 +638,7 @@ describe("PREKeywordMarketV1", () => {
                 bidUsd: 0n,
                 coverage: 0n,
                 withdrawal: 0n,
+                openingSequence: 0n,
               });
           } else if (command.operation === "REQUEST") {
             if (position.amount === 0n || position.withdrawal !== 0n) continue;
@@ -491,6 +657,7 @@ describe("PREKeywordMarketV1", () => {
               bidUsd: 0n,
               coverage: 0n,
               withdrawal: 0n,
+              openingSequence: 0n,
             });
           }
           const change = (await decodedEvents(market, transaction)).find(
@@ -702,18 +869,105 @@ describe("PREKeywordMarketV1", () => {
     expect((await market.topStakeOf(keywordId)).staker).to.equal(bob.address);
   });
 
-  it("breaks equal bids by lower staker address and keeps keywords independent", async () => {
-    const { operator, alice, bob, market, keywordId } = await deploy();
+  it("breaks equal bids by earlier opening regardless of address or deposit and keeps keywords independent", async () => {
+    const { alice, bob, market, keywordId } = await deploy();
+    const earlier = BigInt(alice.address) > BigInt(bob.address) ? alice : bob;
+    const later = earlier === alice ? bob : alice;
     const otherKeyword = ethers.id("other keyword");
+    await stake(market, earlier, keywordId, pre("5"), bid(3));
+    await stake(market, later, keywordId, pre("8"), bid(3));
+    expect((await market.topStakeOf(keywordId)).staker).to.equal(earlier.address);
+    await stake(market, later, keywordId, 0n, bid(4));
+    expect((await market.topStakeOf(keywordId)).staker).to.equal(later.address);
+    await stake(market, later, otherKeyword, pre("3"), bid(1));
+    await stake(market, earlier, otherKeyword, pre("5"), bid(1));
+    expect((await market.topStakeOf(otherKeyword)).staker).to.equal(
+      later.address,
+    );
+  });
+
+  it("orders equal bids by execution order when both positions open in the same block", async () => {
+    const { alice, bob, market, keywordId } = await deploy();
+    const earlier = BigInt(alice.address) > BigInt(bob.address) ? alice : bob;
+    const later = earlier === alice ? bob : alice;
+    const gasPrice = (await ethers.provider.getFeeData()).gasPrice!;
+    await ethers.provider.send("evm_setAutomine", [false]);
+    try {
+      const first = await market.connect(earlier).stake(
+        keywordId, pre("5"), bid(3), { gasLimit: 1_000_000n, gasPrice },
+      );
+      const second = await market.connect(later).stake(
+        keywordId, pre("8"), bid(3), { gasLimit: 1_000_000n, gasPrice },
+      );
+      await ethers.provider.send("evm_mine", []);
+      const firstReceipt = await first.wait();
+      const secondReceipt = await second.wait();
+      expect(firstReceipt!.status).to.equal(1);
+      expect(secondReceipt!.status).to.equal(1);
+      expect(firstReceipt!.blockNumber).to.equal(secondReceipt!.blockNumber);
+      expect(firstReceipt!.index).to.be.lessThan(secondReceipt!.index);
+      expect((await market.topStakeOf(keywordId)).staker).to.equal(earlier.address);
+    } finally {
+      await ethers.provider.send("evm_setAutomine", [true]);
+    }
+  });
+
+  it("preserves opening priority through top-ups, repricing, partial charges and requalification", async () => {
+    const { operator, alice, bob, market, keywordId } = await deploy();
     await stake(market, alice, keywordId, pre("5"), bid(3));
     await stake(market, bob, keywordId, pre("8"), bid(3));
-    const lowerAddress =
-      BigInt(alice.address) < BigInt(bob.address) ? alice.address : bob.address;
-    expect((await market.topStakeOf(keywordId)).staker).to.equal(lowerAddress);
-    await stake(market, bob, otherKeyword, pre("3"), bid(1));
-    expect((await market.topStakeOf(otherKeyword)).staker).to.equal(
-      bob.address,
+    await stake(market, alice, keywordId, pre("1"), bid(3));
+    expect((await market.topStakeOf(keywordId)).staker).to.equal(alice.address);
+    await stake(market, alice, keywordId, 0n, bid(1));
+    expect((await market.topStakeOf(keywordId)).staker).to.equal(bob.address);
+    await stake(market, alice, keywordId, 0n, bid(3));
+    expect((await market.topStakeOf(keywordId)).staker).to.equal(alice.address);
+    await market.connect(operator).chargeStake(
+      keywordId, alice.address, 1n, pre("2"), ethers.id("priority-partial"),
     );
+    expect((await market.topStakeOf(keywordId)).staker).to.equal(alice.address);
+    await market.connect(operator).chargeStake(
+      keywordId, alice.address, 1n, pre("3.5"), ethers.id("priority-ineligible"),
+    );
+    expect((await market.topStakeOf(keywordId)).staker).to.equal(bob.address);
+    await stake(market, alice, keywordId, pre("1"), bid(3));
+    expect((await market.topStakeOf(keywordId)).staker).to.equal(alice.address);
+  });
+
+  it("caps an oversized charge, promotes a lower bid and resets priority on reopening", async () => {
+    const { operator, alice, bob, market, keywordId } = await deploy();
+    await stake(market, alice, keywordId, pre("5"), bid(4));
+    await stake(market, bob, keywordId, pre("8"), bid(3));
+    expect((await market.topStakeOf(keywordId)).staker).to.equal(alice.address);
+    const chargeId = ethers.id("priority-drained");
+    await expect(market.connect(operator).chargeStake(
+      keywordId, alice.address, 1n, pre("7"), chargeId,
+    )).to.emit(market, "StakeCharged").withArgs(
+      keywordId, alice.address, chargeId, pre("7"), pre("5"), 0n,
+    );
+    const empty = await market.stakeDetailsOf(keywordId, alice.address);
+    expect(empty.amount).to.equal(0n);
+    expect(empty.bidUsd).to.equal(0n);
+    expect(empty.eligible).to.equal(false);
+    expect((await market.topStakeOf(keywordId)).staker).to.equal(bob.address);
+    await stake(market, alice, keywordId, pre("5"), bid(3));
+    expect((await market.topStakeOf(keywordId)).staker).to.equal(bob.address);
+    expect((await market.stakeDetailsOf(keywordId, alice.address)).positionVersion).to.equal(2n);
+    await stake(market, alice, keywordId, 0n, bid(4));
+    expect((await market.topStakeOf(keywordId)).staker).to.equal(alice.address);
+  });
+
+  it("gives a withdrawn position new priority when it reopens", async () => {
+    const { alice, bob, market, keywordId } = await deploy();
+    await stake(market, alice, keywordId, pre("5"), bid(3));
+    await stake(market, bob, keywordId, pre("8"), bid(3));
+    await market.connect(alice).requestUnstake(keywordId);
+    const details = await market.stakeDetailsOf(keywordId, alice.address);
+    await advanceTo(details.withdrawAvailableAt);
+    await market.connect(alice).unstake(keywordId);
+    await stake(market, alice, keywordId, pre("5"), bid(3));
+    expect((await market.topStakeOf(keywordId)).staker).to.equal(bob.address);
+    expect((await market.stakeDetailsOf(keywordId, alice.address)).positionVersion).to.equal(2n);
   });
 
   it("keeps the heap leader correct through multi-level bid changes, exits and charges", async () => {
@@ -722,7 +976,7 @@ describe("PREKeywordMarketV1", () => {
     const bids = [4, 7, 2, 8, 1, 6, 3, 5];
     async function assertTop() {
       const active = await Promise.all(
-        participants.map(async (staker) => {
+        participants.map(async (staker, index) => {
           const details = await market.stakeDetailsOf(
             keywordId,
             staker.address,
@@ -731,6 +985,7 @@ describe("PREKeywordMarketV1", () => {
             address: staker.address,
             bidUsd: details.bidUsd,
             eligible: details.eligible,
+            openingSequence: index,
           };
         }),
       );
@@ -738,7 +993,7 @@ describe("PREKeywordMarketV1", () => {
         if (left.eligible !== right.eligible) return left.eligible ? -1 : 1;
         if (left.bidUsd !== right.bidUsd)
           return left.bidUsd > right.bidUsd ? -1 : 1;
-        return BigInt(left.address) < BigInt(right.address) ? -1 : 1;
+        return left.openingSequence - right.openingSequence;
       });
       const expected =
         active.find((position) => position.eligible)?.address ??

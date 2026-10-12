@@ -53,7 +53,7 @@ export interface KeywordMarketDeploymentInputs {
   startPaused: boolean;
 }
 
-export type KeywordMarketCheckStage = "rollout" | "active";
+export type KeywordMarketCheckStage = "bootstrap" | "rollout" | "active";
 
 export async function readKeywordMarketAccounting(
   market: BaseContract,
@@ -105,10 +105,11 @@ export function parseKeywordMarketCheckStage(
   startPaused = false,
 ): KeywordMarketCheckStage {
   if (!value) return startPaused ? "rollout" : "active";
+  if (value === "bootstrap") return "bootstrap";
   if (value === "rollout") return "rollout";
   if (value === "active") return "active";
   throw new Error(
-    "KEYWORD_MARKET_CHECK_STAGE must be exactly rollout or active.",
+    "KEYWORD_MARKET_CHECK_STAGE must be exactly bootstrap, rollout or active.",
   );
 }
 
@@ -138,12 +139,42 @@ export function assertKeywordMarketRolloutState(
       "Keyword Market operator does not match the expected operator (zero by default).",
     );
   }
-  if (paused !== (stage === "rollout")) {
+  if (stage !== "bootstrap" && paused !== (stage === "rollout")) {
     throw new Error(
       stage === "rollout"
         ? "Keyword Market must remain paused during rollout."
         : "Keyword Market is paused; staking is not active.",
     );
+  }
+}
+
+export function readKeywordMarketExpectedPriceUpdater(
+  deploymentNetwork: DeploymentNetwork,
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  const key = deploymentEnvironmentKey(deploymentNetwork, "ADS_PRICE_UPDATER_ADDRESS");
+  const value = environment[key]?.trim();
+  if (!value) return undefined;
+  if (!ethers.isAddress(value)) throw new Error(`${key} must be a public address when set.`);
+  return ethers.getAddress(value);
+}
+
+export function assertKeywordMarketPriceState(
+  priceE18: bigint,
+  quotedAt: bigint,
+  updater: string,
+  stage: KeywordMarketCheckStage,
+  expectedUpdater?: string,
+) {
+  const normalizedUpdater = ethers.getAddress(updater);
+  if (expectedUpdater && normalizedUpdater !== ethers.getAddress(expectedUpdater)) {
+    throw new Error("Keyword Market price updater does not match the expected updater.");
+  }
+  if ((priceE18 === 0n) !== (quotedAt === 0n)) {
+    throw new Error("Keyword Market price and quote timestamp must be initialized together.");
+  }
+  if (stage === "active" && (priceE18 <= 0n || quotedAt <= 0n || normalizedUpdater === ethers.ZeroAddress)) {
+    throw new Error("Keyword Market active readiness requires a price updater and the first positive PRE/USD quote.");
   }
 }
 

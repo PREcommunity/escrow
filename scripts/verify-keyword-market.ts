@@ -1,3 +1,4 @@
+import { verifyContract } from "@nomicfoundation/hardhat-verify/verify";
 import { ethers, hardhatRuntime, network } from "./lib/hardhat-runtime";
 import {
   assertConnectedChainId,
@@ -48,7 +49,7 @@ async function main() {
     }
   }
 
-  await hardhatRuntime.tasks.getTask(["verify", "etherscan"]).run({
+  await verifyContract({
     address,
     constructorArgs: [
       values.owner,
@@ -59,7 +60,7 @@ async function main() {
         : [manifest?.startPaused ?? values.startPaused]),
     ],
     contract: "contracts/PREKeywordMarketV1.sol:PREKeywordMarketV1",
-  });
+  }, hardhatRuntime);
 }
 
 main().catch((error: unknown) => {

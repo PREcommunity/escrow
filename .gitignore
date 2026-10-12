@@ -15,3 +15,5 @@ types/ethers-contracts/
 .deployments/
 *.log
 .keystore*
+keystore/
+reports/
