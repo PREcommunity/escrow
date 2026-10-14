@@ -8,4 +8,4 @@ allowBuilds:
   secp256k1: true
 
 overrides:
-  serialize-javascript: 7.0.3
+  serialize-javascript: 7.0.5
