@@ -52,7 +52,7 @@
     "fast-check": "^4.9.0",
     "hardhat": "3.19.0",
     "mocha": "^11.8.0",
-    "solhint": "6.2.4",
+    "solhint": "6.2.5",
     "typescript": "^5.9.3"
   }
 }
