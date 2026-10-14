@@ -75,8 +75,8 @@ importers:
         specifier: ^11.8.0
         version: 11.8.0
       solhint:
-        specifier: 6.2.4
-        version: 6.2.4(typescript@5.9.3)
+        specifier: 6.2.5
+        version: 6.2.5(typescript@5.9.3)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -679,8 +679,8 @@ packages:
     resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
     engines: {node: 18 || 20 || >=22}
 
-  better-ajv-errors@2.0.3:
-    resolution: {integrity: sha512-t1vxUP+vYKsaYi/BbKo2K98nEAZmfi4sjwvmRT8aOPDzPJeAtLurfoIDazVkLILxO4K+Sw4YrLYnBQ46l6pePg==}
+  better-ajv-errors@2.0.4:
+    resolution: {integrity: sha512-ezhaIONGpRAPg9FeAovIXHdFXxdkVBqn7+KWOmIrWEAJmcKGj6xBTyM2KfC+hnKE4vNpq061Qf4zq0ocWOuC4Q==}
     engines: {node: '>= 18.20.6'}
     peerDependencies:
       ajv: 4.11.8 - 8
@@ -1127,8 +1127,8 @@ packages:
   lru-cache@10.4.3:
     resolution: {integrity: sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==}
 
-  lru-cache@11.5.2:
-    resolution: {integrity: sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g==}
+  lru-cache@11.5.3:
+    resolution: {integrity: sha512-U4N8FgzmWxc8k1VH8Kr6lQg18U7Fjvby6wXHVRX/ZZ7IwWbRMgrRbP0Wrb5q5NVinryp4SQampHKdvtecItxUg==}
     engines: {node: 20 || >=22}
 
   micro-eth-signer@0.19.0:
@@ -1257,8 +1257,8 @@ packages:
     engines: {node: '>=10.13.0'}
     hasBin: true
 
-  prettier@3.9.6:
-    resolution: {integrity: sha512-OpN0zzVdiaiAhxpuuj5efpIS4sY9j7bY6uR5mnj5yPzGkdkjNKSJeUThPb60Jw29QuAZgA4o+/iB49kFiaBX6g==}
+  prettier@3.9.10:
+    resolution: {integrity: sha512-skGHTH1Yb9QvaTC4hWnRTzEYtCpApF0UMBPz+t/0ZPzP8ihefo/btKd+QA7pUE0fEwA1SbS/NmhyEcstdXOIdA==}
     engines: {node: '>=14'}
     hasBin: true
 
@@ -1361,8 +1361,8 @@ packages:
     resolution: {integrity: sha512-qMCMfhY040cVHT43K9BFygqYbUPFZKHOg7K73mtTWJRb8pyP3fzf4Ixd5SzdEJQ6MRUg/WBnOLxghZtKKurENQ==}
     engines: {node: '>=10'}
 
-  solhint@6.2.4:
-    resolution: {integrity: sha512-2hCfsDGcCit/4Ue0Bf3HxalxEaHM/rfoSf3rMVAQQ5NWWcVPS0F+RSqQzMEPc8Ta7r5L3DeaKyzmbjD5B2fUdg==}
+  solhint@6.2.5:
+    resolution: {integrity: sha512-WCkEQIJHMaCLv7d9SuTsGjcsprv2DLP2dxg95oUtAe7qYh4Ho3NfECCNSSTZ6OPnjv1HMV8z2Bcg7nH1UBAZiA==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -2099,7 +2099,7 @@ snapshots:
 
   balanced-match@4.0.4: {}
 
-  better-ajv-errors@2.0.3(ajv@8.20.0):
+  better-ajv-errors@2.0.4(ajv@8.20.0):
     dependencies:
       '@babel/code-frame': 7.29.7
       '@humanwhocodes/momoa': 2.0.4
@@ -2562,7 +2562,7 @@ snapshots:
 
   lru-cache@10.4.3: {}
 
-  lru-cache@11.5.2: {}
+  lru-cache@11.5.3: {}
 
   micro-eth-signer@0.19.0:
     dependencies:
@@ -2682,7 +2682,7 @@ snapshots:
 
   path-scurry@2.0.2:
     dependencies:
-      lru-cache: 11.5.2
+      lru-cache: 11.5.3
       minipass: 7.1.3
 
   path-type@4.0.0: {}
@@ -2693,7 +2693,7 @@ snapshots:
 
   prettier@2.8.8: {}
 
-  prettier@3.9.6:
+  prettier@3.9.10:
     optional: true
 
   prompts@2.4.2:
@@ -2772,12 +2772,12 @@ snapshots:
       astral-regex: 2.0.0
       is-fullwidth-code-point: 3.0.0
 
-  solhint@6.2.4(typescript@5.9.3):
+  solhint@6.2.5(typescript@5.9.3):
     dependencies:
       '@solidity-parser/parser': 0.20.2
       ajv: 8.20.0
       ast-parents: 0.0.1
-      better-ajv-errors: 2.0.3(ajv@8.20.0)
+      better-ajv-errors: 2.0.4(ajv@8.20.0)
       chalk: 4.1.2
       commander: 10.0.1
       cosmiconfig: 8.3.6(typescript@5.9.3)
@@ -2792,7 +2792,7 @@ snapshots:
       table: 6.9.0
       text-table: 0.2.0
     optionalDependencies:
-      prettier: 3.9.6
+      prettier: 3.9.10
     transitivePeerDependencies:
       - typescript
 
